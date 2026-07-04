@@ -1,0 +1,19 @@
+; Engine configuration file.
+; Asset Forge 独立项目 minimal 壳（让插件能加载 + 测试能跑）。
+; 实际使用时把 addons/asset_forge 复制到你的 Godot 4.6 项目即可。
+
+config_version=5
+
+[application]
+
+config/name="godot-asset-forge"
+config/description="bash 驱动的 Godot 资产生成插件：WebSocket 指令 → 编辑器内实时造节点"
+config/features=PackedStringArray("4.6", "Forward Plus")
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/asset_forge/plugin.cfg")
+
+[rendering]
+
+renderer="forward_plus"

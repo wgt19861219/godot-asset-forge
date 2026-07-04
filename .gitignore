@@ -1,0 +1,22 @@
+# Godot 4+ 编辑器数据（自动生成）
+.godot/
+/android/build/
+
+# 资源 UID（自动重生成）
+*.uid
+
+# 编辑器临时
+*.translation
+/editor/
+
+# Python 客户端缓存
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
+
+# 截图（可重生成）
+screenshot*.png
