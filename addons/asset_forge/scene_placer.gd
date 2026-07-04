@@ -6,8 +6,16 @@ extends RefCounted
 
 const GENERATED_DIR := "res://GeneratedAssets"
 
+
 # place：返回 {success, node_path, resource_path, error}
-static func place(root: Node, mesh: Mesh, material: Material, payload: Dictionary, undo_stack: Array, batch_id: int) -> Dictionary:
+static func place(
+	root: Node,
+	mesh: Mesh,
+	material: Material,
+	payload: Dictionary,
+	undo_stack: Array,
+	batch_id: int
+) -> Dictionary:
 	if root == null:
 		return {"success": false, "node_path": "", "resource_path": "", "error": "no_active_scene"}
 	var parent: Node = _resolve_parent(root, String(payload.get("parent", "")))
@@ -35,6 +43,7 @@ static func place(root: Node, mesh: Mesh, material: Material, payload: Dictionar
 		node_path = str(parent.get_path_to(mi)) if parent.is_inside_tree() else mi.name
 	return {"success": true, "node_path": node_path, "resource_path": res_path, "error": ""}
 
+
 # undo_last：仅 queue_free 场景节点，绝不删 .tscn（IMPORTANT-2）；batch 原子（Q4）
 static func undo_last(undo_stack: Array) -> Dictionary:
 	if undo_stack.is_empty():
@@ -53,7 +62,9 @@ static func undo_last(undo_stack: Array) -> Dictionary:
 	# 注：不删 top["saved_path"]——.tscn 是用户可复用资产，undo 只撤场景节点
 	return {"success": true, "freed": freed, "error": ""}
 
+
 # --- helpers ---
+
 
 static func _resolve_parent(root: Node, parent_path: String) -> Node:
 	if parent_path.is_empty():
@@ -73,6 +84,7 @@ static func _resolve_parent(root: Node, parent_path: String) -> Node:
 		return root.get_node_or_null(NodePath("/".join(parts)))
 	return root.get_node_or_null(NodePath(parent_path))
 
+
 static func _unique_node_name(parent: Node, base_name: String) -> String:
 	var nm := base_name if not base_name.is_empty() else "asset"
 	if parent.get_node_or_null(NodePath(nm)) == null:
@@ -85,6 +97,7 @@ static func _unique_node_name(parent: Node, base_name: String) -> String:
 		i += 1
 	return "%s_%d" % [nm, Time.get_ticks_msec()]
 
+
 static func _apply_transform(node: Node3D, t: Variant) -> void:
 	if not (t is Dictionary):
 		return
@@ -96,6 +109,7 @@ static func _apply_transform(node: Node3D, t: Variant) -> void:
 	if d.has("scale"):
 		node.scale = _vec3(d, "scale")
 
+
 static func _vec3(d: Dictionary, key: String) -> Vector3:
 	if not d.has(key):
 		return Vector3.ZERO
@@ -103,7 +117,11 @@ static func _vec3(d: Dictionary, key: String) -> Vector3:
 	if arr is Array:
 		var a := arr as Array
 		return Vector3(float(a[0]), float(a[1]), float(a[2])) if a.size() >= 3 else Vector3.ZERO
+	if arr is PackedFloat64Array:  # A-1：补 PackedFloat64Array 分支，与 asset_factory._vec3 约定一致
+		var a2 := arr as PackedFloat64Array
+		return Vector3(a2[0], a2[1], a2[2]) if a2.size() >= 3 else Vector3.ZERO
 	return Vector3.ZERO
+
 
 static func _save_as_tscn(node: Node, name: String) -> String:
 	DirAccess.make_dir_recursive_absolute(GENERATED_DIR)

@@ -7,6 +7,7 @@ extends SceneTree
 var _passed: int = 0
 var _failed: int = 0
 
+
 func _initialize() -> void:
 	_run_suite("AssetFactory", preload("res://tests/test_asset_factory.gd").new())
 	_run_suite("CustomMeshes", preload("res://tests/test_custom_meshes.gd").new())
@@ -15,12 +16,15 @@ func _initialize() -> void:
 	print("\n=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 
+
 func _run_suite(suite_name: String, suite: RefCounted) -> void:
 	print("\n--- Suite: %s ---" % suite_name)
 	suite.run(self)
 
+
 # runner API：测试文件通过 runner.check / runner.check_approx / runner.root 调用。
 # runner.root 来自 SceneTree.root（Viewport），供需要入树的测试用（如 test_scene_placer）。
+
 
 func check(cond: bool, message: String) -> void:
 	if cond:
@@ -28,6 +32,7 @@ func check(cond: bool, message: String) -> void:
 	else:
 		_failed += 1
 	print("  %s: %s" % ["PASS" if cond else "FAIL", message])
+
 
 func check_approx(actual: float, expected: float, eps: float, message: String) -> void:
 	check(absf(actual - expected) <= eps, message)

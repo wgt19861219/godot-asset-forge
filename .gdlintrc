@@ -1,0 +1,11 @@
+---
+# A-11：gdlint 配置
+# 项目用中文注释（行较长）+ Godot 私有命名约定（_前缀常量/变量）+ 数学惯例（单字母参数），
+# 与 gdlint 默认严格规则冲突，此处 disable（不改变代码，仅配置）。
+disable:
+  - load-constant-name        # _Server/_Dock 是 Godot 私有约定 vs gdlint 大写蛇形
+  - class-definitions-order   # signal/var 顺序按可读性排，不强制 gdlint 模板
+  - max-returns               # _handle_text 协议分发天然多 return
+  - function-argument-name    # _torus_vertex 的 R 单字母数学惯例
+  - function-variable-name    # make_torus 的 R 单字母数学惯例
+max-line-length: 120          # 中文注释 + 长 res:// 路径，放宽到 120

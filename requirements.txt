@@ -1,0 +1,3 @@
+# Asset Forge bash 客户端依赖（A-13：锁版本，防 websockets 大版本 API 破坏性变更）
+# 用法：pip install -r requirements.txt
+websockets>=12,<15

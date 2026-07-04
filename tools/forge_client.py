@@ -47,10 +47,15 @@ def read_token(args):
     return p.read_text(encoding="utf-8").strip()
 
 
-async def send_and_recv(ws, msg):
+async def send_and_recv(ws, msg, timeout=30.0):
     await ws.send(json.dumps(msg, ensure_ascii=False))
     while True:
-        data = json.loads(await ws.recv())
+        # A-5：单次 recv 超时，防止 server 静默丢消息（如非 dict JSON）时 while True 死循环
+        try:
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=timeout))
+        except asyncio.TimeoutError:
+            print(f"等待 server 响应超时（{timeout}s 无消息），id={msg.get('id')}", file=sys.stderr)
+            sys.exit(5)
         if data.get("type") == "generate_result" and data.get("id") == msg.get("id"):
             return data
 
@@ -65,7 +70,12 @@ async def send_and_recv_batch(ws, msg, n):
     req_id = msg.get("id")
     results = []
     while len(results) < n:
-        data = json.loads(await ws.recv())
+        # A-5：单次 recv 超时，防 server 静默时 while 死循环（收齐 n 条后正常退出）
+        try:
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=30.0))
+        except asyncio.TimeoutError:
+            print(f"等待 server 响应超时（30s 无消息），已收 {len(results)}/{n}，req_id={req_id}", file=sys.stderr)
+            sys.exit(5)
         if data.get("type") == "generate_result" and data.get("id") == req_id:
             results.append(data)
     return results
@@ -76,7 +86,12 @@ async def connect_and_handshake(args):
     token = read_token(args)
     await ws.send(json.dumps({"type": "handshake", "payload": {"client": "forge_client", "version": "1.0.0", "token": token}}))
     while True:
-        data = json.loads(await ws.recv())
+        # A-5：单次 recv 超时，防 server 未响应 handshake 时 while 死循环
+        try:
+            data = json.loads(await asyncio.wait_for(ws.recv(), timeout=30.0))
+        except asyncio.TimeoutError:
+            print("等待 handshake_ack 超时（30s 无消息）", file=sys.stderr)
+            sys.exit(5)
         if data.get("type") == "handshake_ack":
             return ws
         if data.get("error") == "unauthorized":
@@ -89,7 +104,14 @@ def build_payload(args):
     if args.name:
         payload["name"] = args.name
     if args.mat:
-        payload["material"] = json.loads(args.mat) if args.mat.startswith("{") else args.mat
+        if args.mat.startswith("{"):
+            try:
+                payload["material"] = json.loads(args.mat)  # A-6：畸形 JSON 友好报错而非 traceback
+            except json.JSONDecodeError as e:
+                print(f"--mat JSON 解析失败: {e}", file=sys.stderr)
+                sys.exit(2)
+        else:
+            payload["material"] = args.mat
     transform = {}
     if args.pos:
         transform["position"] = list(args.pos)

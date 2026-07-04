@@ -75,7 +75,7 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 | `tube` | 手写 | `height 1` / `radius 0.5` / `thickness 0.1` |
 | `torus` | 手写 | `major_radius 0.5` / `minor_radius 0.2` |
 | `stairs` | 手写 组合 | `steps 5` / `step_height 0.2` / `step_depth 0.3` / `width 1.2` |
-| `fence` | 手写 组合 | `length 3` / `height 1.2` / `posts 4` |
+| `fence` | 手写 组合 | `length 3` / `height 1.2` / `posts 4` / `post_radius 0.05` / `rail_thickness 0.04` |
 
 详见 [docs/shapes-reference.md](docs/shapes-reference.md)。
 

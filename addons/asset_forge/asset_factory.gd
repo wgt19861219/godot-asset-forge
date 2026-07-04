@@ -4,6 +4,7 @@
 class_name AssetFactory
 extends RefCounted
 
+
 static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 	match shape.to_lower():
 		"box":
@@ -30,21 +31,35 @@ static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 			return m
 		"wall":  # 语义化 box：length/height/thickness
 			var m := BoxMesh.new()
-			m.size = Vector3(float(params.get("length", 2.0)), float(params.get("height", 1.0)), float(params.get("thickness", 0.1)))
+			m.size = Vector3(
+				float(params.get("length", 2.0)),
+				float(params.get("height", 1.0)),
+				float(params.get("thickness", 0.1))
+			)
 			return m
 		"ramp":  # 语义化 prism：坡道
 			var m := PrismMesh.new()
-			m.size = Vector3(float(params.get("length", 2.0)), float(params.get("height", 1.0)), float(params.get("width", 1.0)))
+			m.size = Vector3(
+				float(params.get("length", 2.0)),
+				float(params.get("height", 1.0)),
+				float(params.get("width", 1.0))
+			)
 			m.left_to_right = 0.0
 			return m
-		"cone":   return CustomMeshes.make_cone(params)
-		"tube":   return CustomMeshes.make_tube(params)
-		"torus":  return CustomMeshes.make_torus(params)
-		"stairs": return CustomMeshes.make_stairs(params)
-		"fence":  return CustomMeshes.make_fence(params)
+		"cone":
+			return CustomMeshes.make_cone(params)
+		"tube":
+			return CustomMeshes.make_tube(params)
+		"torus":
+			return CustomMeshes.make_torus(params)
+		"stairs":
+			return CustomMeshes.make_stairs(params)
+		"fence":
+			return CustomMeshes.make_fence(params)
 		_:
 			LogHelper.error("AssetFactory: 未知 shape '%s'" % shape)
 			return null
+
 
 static func create_material(spec: Variant) -> Material:
 	if spec == null:
@@ -54,17 +69,17 @@ static func create_material(spec: Variant) -> Material:
 		if s.begins_with("res://"):
 			var loaded = load(s)
 			return loaded if loaded is Material else MaterialLibrary.get_material("default")
-		return MaterialLibrary.get_material(s)   # 预设名（未知 → default 回退，Task 2 已测）
+		return MaterialLibrary.get_material(s)  # 预设名（未知 → default 回退，Task 2 已测）
 	if spec is Dictionary:
 		var d: Dictionary = spec
 		var mat := StandardMaterial3D.new()
 		if d.has("color"):
-			mat.albedo_color = Color.html(String(d["color"]))
+			mat.albedo_color = _safe_html(String(d["color"]), Color(1, 1, 1))  # A-4：非法 hex 回退白
 		mat.metallic = float(d.get("metallic", 0.0))
 		mat.roughness = float(d.get("roughness", 0.7))
 		if d.has("emissive"):
 			mat.emission_enabled = true
-			mat.emission = Color.html(String(d["emissive"]))
+			mat.emission = _safe_html(String(d["emissive"]), Color(0, 0, 0))  # A-4：非法 hex 回退黑（不发光）
 		if d.has("alpha"):
 			var a: float = float(d["alpha"])
 			if a < 1.0:
@@ -74,6 +89,17 @@ static func create_material(spec: Variant) -> Material:
 				mat.albedo_color = c
 		return mat
 	return MaterialLibrary.get_material("default")
+
+
+# A-4：Color.html 对非法 hex 返黑色 + stderr 噪声。校验合法 hex（3/4/6/8 位），非法时 warning + 回退 fallback
+static func _safe_html(hex: String, fallback: Color) -> Color:
+	var s := hex.strip_edges().lstrip("#")
+	var ok_len := s.length() == 6 or s.length() == 8 or s.length() == 3 or s.length() == 4
+	if ok_len and s.is_valid_hex_number():
+		return Color.html(hex)
+	LogHelper.warning("非法 hex 颜色 '%s'，回退 %s" % [hex, str(fallback)])
+	return fallback
+
 
 # JSON 数组 [x,y,z] → Vector3
 static func _vec3(params: Dictionary, key: String, default_v: Vector3) -> Vector3:

@@ -2,6 +2,7 @@ extends RefCounted
 ## scene_placer 单测（place/undo 语义 IMPORTANT-2 + name 碰撞 + parent_not_found + batch 原子 + save .tscn 不被 undo 删）。
 ## root 入树（runner.root.add_child）以使绝对 NodePath 解析生效（项目惯例，见 test_alarm）。
 
+
 func run(runner) -> void:
 	var root := Node3D.new()
 	root.name = "Root"
@@ -18,18 +19,31 @@ func run(runner) -> void:
 	runner.check(root.get_node_or_null(NodePath("crate_001")) != null, "name 碰撞 → crate_001")
 	# parent_not_found（Q5：中间路径不自动建；不入栈）
 	var r3 := ScenePlacer.place(root, mesh, null, {"name": "x", "parent": "/Root/Nope"}, stack, 1)
-	runner.check(not bool(r3["success"]) and String(r3["error"]) == "parent_not_found", "parent 不存在 → parent_not_found")
+	runner.check(
+		not bool(r3["success"]) and String(r3["error"]) == "parent_not_found",
+		"parent 不存在 → parent_not_found"
+	)
 	# parent 指定子节点（同 batch_id=1）
 	var decor := Node3D.new()
 	decor.name = "Decor"
 	root.add_child(decor)
-	var r4 := ScenePlacer.place(root, mesh, null, {"name": "barrel", "parent": "/Root/Decor"}, stack, 1)
-	runner.check(bool(r4["success"]) and decor.get_node_or_null(NodePath("barrel")) != null, "parent=/Root/Decor → barrel 进 Decor")
+	var r4 := ScenePlacer.place(
+		root, mesh, null, {"name": "barrel", "parent": "/Root/Decor"}, stack, 1
+	)
+	runner.check(
+		bool(r4["success"]) and decor.get_node_or_null(NodePath("barrel")) != null,
+		"parent=/Root/Decor → barrel 进 Decor"
+	)
 	# undo_last 整 batch=1（3 节点原子弹）
 	var ur1 := ScenePlacer.undo_last(stack)
-	runner.check(bool(ur1["success"]) and int(ur1["freed"]) == 3, "undo_last freed 3（同 batch=1 原子弹）")
+	runner.check(
+		bool(ur1["success"]) and int(ur1["freed"]) == 3, "undo_last freed 3（同 batch=1 原子弹）"
+	)
 	var ur2 := ScenePlacer.undo_last(stack)
-	runner.check(not bool(ur2["success"]) and String(ur2["error"]) == "nothing_to_undo", "undo 空栈 → nothing_to_undo")
+	runner.check(
+		not bool(ur2["success"]) and String(ur2["error"]) == "nothing_to_undo",
+		"undo 空栈 → nothing_to_undo"
+	)
 	# batch 原子 undo（Q4）
 	var stack2: Array = []
 	ScenePlacer.place(root, mesh, null, {"name": "b1"}, stack2, 10)
@@ -43,12 +57,33 @@ func run(runner) -> void:
 	# save .tscn + undo 不删（IMPORTANT-2 核心）
 	var stack3: Array = []
 	var rs := ScenePlacer.place(root, mesh, null, {"name": "saveme", "save": true}, stack3, 20)
-	runner.check(bool(rs["success"]) and String(rs["resource_path"]) != "", "save=true 返 resource_path")
+	runner.check(
+		bool(rs["success"]) and String(rs["resource_path"]) != "", "save=true 返 resource_path"
+	)
 	var path: String = rs["resource_path"]
 	runner.check(FileAccess.file_exists(path), ".tscn 存盘存在: " + path)
 	ScenePlacer.undo_last(stack3)
 	runner.check(FileAccess.file_exists(path), "undo 后 .tscn 仍在（IMPORTANT-2：undo 不删 .tscn）")
 	DirAccess.remove_absolute(path)  # 清理
+	# A-1：transform.position 以 PackedFloat64Array 传入应正确解析（与 asset_factory._vec3 约定一致，非 Vector3.ZERO）
+	var stack4: Array = []
+	var rpf := ScenePlacer.place(
+		root,
+		mesh,
+		null,
+		{"name": "pf64", "transform": {"position": PackedFloat64Array([1.5, 2.5, 3.5])}},
+		stack4,
+		30
+	)
+	runner.check(bool(rpf["success"]), "PackedFloat64Array position place success（A-1）")
+	var pf64: Node3D = root.get_node_or_null(NodePath("pf64"))
+	runner.check(pf64 != null, "pf64 节点存在（A-1）")
+	if pf64 != null:
+		runner.check_approx(
+			pf64.position.x, 1.5, 0.001, "pf64 position.x = 1.5（A-1 PackedFloat64Array 解析，非 0）"
+		)
+		runner.check_approx(pf64.position.y, 2.5, 0.001, "pf64 position.y = 2.5（A-1）")
+		runner.check_approx(pf64.position.z, 3.5, 0.001, "pf64 position.z = 3.5（A-1）")
 	# 清理 root
 	runner.root.remove_child(root)
 	root.free()

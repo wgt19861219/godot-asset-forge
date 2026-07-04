@@ -20,3 +20,6 @@ Thumbs.db
 
 # 截图（可重生成）
 screenshot*.png
+
+# 生成资产（save=true 写的 .tscn，A-12：可重生成，不进 git）
+GeneratedAssets/
