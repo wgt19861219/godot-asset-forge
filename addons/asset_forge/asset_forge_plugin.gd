@@ -135,10 +135,19 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 		_server.send_result(req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws)
 
 
-# generate_path 编排：parse → validate → sample → 复用 place 循环（共享 batch_id，per-point 散回执）
+# generate_path 编排：parse → validate → sample → mode 分流 → _place_one 循环（共享 batch_id，per-point 散回执）
 func _handle_generate_path(
 	payload: Dictionary, batch_id: int, req_id: String, ws: WebSocketPeer
 ) -> void:
+	var mode := String(payload.get("mode", "discrete"))
+	if mode != "discrete" and mode != "continuous":
+		_server.send_result(
+			req_id,
+			false,
+			{"error": "invalid_params", "message": "mode 必须 discrete|continuous"},
+			ws
+		)
+		return
 	var parsed: Dictionary = PathGenerator.parse_path(payload.get("path", []))
 	if String(parsed["error"]) != "":
 		_server.send_result(
@@ -150,11 +159,15 @@ func _handle_generate_path(
 	var count: int = int(payload.get("count", 0))
 	var align: String = String(payload.get("align", "path"))
 	var include_endpoints: bool = bool(payload.get("include_endpoints", true))
-	var verr: String = PathGenerator.validate(points, spacing, count, align, include_endpoints)
+	var verr: String = PathGenerator.validate(
+		points, spacing, count, align, include_endpoints, mode
+	)
 	if verr != "":
 		_server.send_result(req_id, false, {"error": "invalid_params", "message": verr}, ws)
 		return
-	var samples: Array = PathGenerator.sample(points, spacing, count, align, include_endpoints)
+	var samples: Array = PathGenerator.sample(
+		points, spacing, count, align, include_endpoints, mode
+	)
 	if samples.size() > _Server.BATCH_LIMIT:
 		_server.send_result(
 			req_id,
@@ -169,8 +182,22 @@ func _handle_generate_path(
 		)
 		return
 	var shape: String = String(payload.get("shape", ""))
-	var mesh = AssetFactory.create_mesh(shape, payload.get("params", {}))
-	if mesh == null:
+	var base_params: Dictionary = payload.get("params", {})
+	# continuous 模式 shape 白名单（length 沿 X）
+	if mode == "continuous" and shape != "wall" and shape != "fence":
+		_server.send_result(
+			req_id,
+			false,
+			{
+				"error": "unsupported_shape",
+				"message":
+				"continuous 模式仅支持 wall/fence（length 沿 X），当前 " + shape
+			},
+			ws
+		)
+		return
+	var probe_mesh = AssetFactory.create_mesh(shape, base_params)
+	if probe_mesh == null:
 		_server.send_result(
 			req_id,
 			false,
@@ -195,31 +222,62 @@ func _handle_generate_path(
 	var base_name: String = String(payload.get("name", ""))
 	if base_name == "":
 		base_name = shape
-	for i in samples.size():
-		var s: Dictionary = samples[i]
-		var pos: Vector3 = s["position"]
-		var rot: Vector3 = s["rotation_deg"]
-		var place_payload := {
-			"name": "%s_%d" % [base_name, i],
-			"transform":
-			{"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
-			"parent": payload.get("parent", ""),
-			"save": payload.get("save", false),
-		}
-		var r := ScenePlacer.place(root, mesh, material, place_payload, _undo_stack, batch_id)
-		if bool(r["success"]):
-			_server.send_result(
-				req_id,
-				true,
-				{"node_path": String(r["node_path"]), "resource_path": String(r["resource_path"])},
-				ws
+	if mode == "discrete":
+		for i in samples.size():
+			var s: Dictionary = samples[i]
+			_place_one(
+				root, probe_mesh, material, base_name, i, s["position"], s["rotation_deg"],
+				payload, batch_id, req_id, ws
 			)
-			if _dock:
-				_dock.add_to_generated_list(
-					String(place_payload["name"]), String(r["node_path"])
-				)
-		else:
-			_server.send_result(
-				req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws
+	else:  # continuous：每段独立 create_mesh（length 注入）
+		for i in samples.size():
+			var seg: Dictionary = samples[i]
+			var seg_params: Dictionary = base_params.duplicate()
+			seg_params["length"] = seg["length"]
+			var seg_mesh := AssetFactory.create_mesh(shape, seg_params)
+			_place_one(
+				root, seg_mesh, material, base_name, i, seg["position"], seg["rotation_deg"],
+				payload, batch_id, req_id, ws
 			)
 	EditorInterface.mark_scene_as_unsaved()
+
+
+# _place_one：构造 place_payload + ScenePlacer.place + send_result（discrete/continuous 共用，消除 loop 重复）
+func _place_one(
+	root: Node,
+	mesh: Mesh,
+	material: Material,
+	base_name: String,
+	i: int,
+	pos_var: Variant,
+	rot_var: Variant,
+	payload: Dictionary,
+	batch_id: int,
+	req_id: String,
+	ws: WebSocketPeer
+) -> void:
+	var pos: Vector3 = pos_var
+	var rot: Vector3 = rot_var
+	var place_payload := {
+		"name": "%s_%d" % [base_name, i],
+		"transform":
+		{"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
+		"parent": payload.get("parent", ""),
+		"save": payload.get("save", false),
+	}
+	var r := ScenePlacer.place(root, mesh, material, place_payload, _undo_stack, batch_id)
+	if bool(r["success"]):
+		_server.send_result(
+			req_id,
+			true,
+			{"node_path": String(r["node_path"]), "resource_path": String(r["resource_path"])},
+			ws
+		)
+		if _dock:
+			_dock.add_to_generated_list(
+				String(place_payload["name"]), String(r["node_path"])
+			)
+	else:
+		_server.send_result(
+			req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws
+		)
