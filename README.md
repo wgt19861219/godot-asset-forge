@@ -54,6 +54,10 @@ python tools/forge_client.py batch box cylinder cone --name a b c
 # 批量（JSON items）
 python tools/forge_client.py batch --items '[{"shape":"box","name":"a"},{"shape":"cone"}]'
 
+# 路径阵列（沿折线摆 shape，自动朝向切线）
+python tools/forge_client.py path cylinder --path '[[0,0,0],[5,0,0],[5,0,5]]' --spacing 1 --mat metal
+python tools/forge_client.py path box --path '[[0,0,0],[10,0,0]]' --count 5 --mat wood
+
 # 存为 .tscn 预制件
 python tools/forge_client.py box --save --name pillar
 
@@ -79,6 +83,21 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 
 详见 [docs/shapes-reference.md](docs/shapes-reference.md)。
 
+## 路径阵列（程序化生成 MVP）
+
+`path` 子命令沿折线摆放 shape：
+
+| 参数 | 说明 |
+|------|------|
+| `--path '[[x,y,z],...]'` | 折线点列表（≥2 点） |
+| `--path-file <file>` | 从 JSON 文件读 path |
+| `--spacing <米>` | 等间距采样（与 `--count` 互斥） |
+| `--count <N>` | 等数量采样（含两端 N-1 等分） |
+| `--align none\|path\|normal` | 朝向：不转 / 沿切线 / 切线+90°（默认 path） |
+| `--no-endpoints` | 不含端点（默认含） |
+
+**朝向注记**：`align=path` 基于「物件正面 -Z、XZ 地平面、Y up」假设。旋转对称物件（box/cylinder/sphere/prism/cone/tube/torus）无视觉差异；**方向敏感物件**（fence/wall 长度沿 X、stairs 上行沿 +Z）用 `align=path` 朝向会偏 90°——离散摆放适合对称物件，方向敏感件的连续铺设留待 v2。
+
 ## 材质
 
 `--mat` 支持三种：
@@ -91,7 +110,7 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 
 ## 协议
 
-JSON over WebSocket（端口 60650，bind 127.0.0.1）。消息类型：`handshake` / `handshake_ack` / `ping`/`pong` / `generate` / `generate_batch` / `generate_result` / `undo_last`。详见 [docs/protocol.md](docs/protocol.md)。
+JSON over WebSocket（端口 60650，bind 127.0.0.1）。消息类型：`handshake` / `handshake_ack` / `ping`/`pong` / `generate` / `generate_batch` / `generate_path` / `generate_result` / `undo_last`。详见 [docs/protocol.md](docs/protocol.md)。
 
 ## 鉴权
 

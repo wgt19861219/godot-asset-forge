@@ -236,7 +236,11 @@ def _parse_path_arg(args):
 
 
 def build_path_payload(args, path):
-    payload = {"shape": args.shape, "path": path}
+    # path 子命令模式：`path <shape> --path ...` 时 args.shape=="path"，真实 shape 在 batch_shapes[0]
+    shape_name = args.shape
+    if shape_name == "path" and args.batch_shapes:
+        shape_name = args.batch_shapes[0]
+    payload = {"shape": shape_name, "path": path}
     if args.name:
         payload["name"] = args.name
     if args.mat:
@@ -316,6 +320,33 @@ async def run_selftest(args):
     ok = bool(result.get("success"))
     all_ok = all_ok and ok
     print(f"{'PASS' if ok else 'FAIL'}  undo_last")
+    # generate_path（路径阵列，3 个采样点 → 3 条 per-point result）
+    path_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_path",
+            "payload": {
+                "shape": "cylinder",
+                "path": [[0, 0, 0], [3, 0, 0], [3, 0, 3]],
+                "count": 3,
+                "material": "metal",
+                "name": "st_path",
+            },
+        },
+        3,
+    )
+    ok = len(path_results) == 3 and all(bool(r.get("success")) for r in path_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path（{len(path_results)}/3 result）")
+    # undo 掉 path 生成的 3 个节点（同 batch_id，原子）
+    # 服务端 undo 回执把 freed 数放在 message 字段（"freed N"），需解析
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_path_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 3
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path undo（freed 3）")
     await ws.close()
     sys.exit(0 if all_ok else 1)
 

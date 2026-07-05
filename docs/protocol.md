@@ -4,7 +4,7 @@ JSON over WebSocket，端口 `60650`，bind `127.0.0.1`（仅本机）。
 
 ## 消息类型
 
-`handshake` / `handshake_ack` / `ping` / `pong` / `generate` / `generate_batch` / `generate_result` / `undo_last`
+`handshake` / `handshake_ack` / `ping` / `pong` / `generate` / `generate_batch` / `generate_path` / `generate_result` / `undo_last`
 
 ## handshake（鉴权）
 
@@ -51,6 +51,32 @@ token 正确 → `{"type":"handshake_ack","payload":{"server":"asset_forge","god
 **回执 = N 条独立 `generate_result`**（共享同一 `req_id`），client 按 `id` 收齐 N 条后聚合（**不返单条 `results[]` 聚合体**）。`items` 上限 64，超出返 `invalid_params`。
 
 > 设计选择：per-item 散回执而非聚合 `results[]`，简化 plugin 状态（无需维护待聚合 batch 缓冲），server 实现可预测。
+
+## generate_path（路径阵列离散摆放，程序化生成 MVP）
+
+请求：
+```json
+{"type":"generate_path","id":"p1","payload":{
+  "shape":"cylinder",
+  "params":{"height":1.5,"radius":0.1},
+  "material":"metal",
+  "path":[[0,0,0],[3,0,0],[3,0,5]],
+  "spacing":2.0,
+  "align":"path",
+  "include_endpoints":true,
+  "name":"lamp",
+  "parent":"/Root3D/Decor",
+  "save":false
+}}
+```
+
+- `path` 必填（≥2 点，每点 `[x,y,z]`）；`spacing` / `count` 二选一；`align` 默认 `"path"`（none/path/normal）；`include_endpoints` 默认 `true`
+- **采样规则**：`spacing` = 等间距（含端点补尾点）；`count` = 等数量（含两端 N-1 等分）；`count==1` 时 `include_endpoints` 必须为 `false`（单点居中）
+- **朝向**：`yaw = atan2(-tangent.x, -tangent.z)`；`none`=不转、`path`=沿切线、`normal`=切线+90°（路径前进方向左侧法线）
+- **回执**：N 条独立 `generate_result` 共享同一 `req_id`（与 `generate_batch` 同语义，per-point 散）
+- **undo**：所有采样点共享一个 batch_id，一条 `undo_last` 全删
+
+错误码：path<2 点 / total_len=0 / spacing/count 缺失·非正·互斥违反 / `count==1`+endpoints / samples>BATCH_LIMIT → 一律 `invalid_params` + message；复用 `unsupported_shape` / `no_active_scene` / `parent_not_found`。
 
 ## undo_last
 
