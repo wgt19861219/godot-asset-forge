@@ -79,7 +79,11 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 			ws
 		)
 		return
-	# generate
+	# generate_path（路径阵列，MVP）—— payload 含 path 走路径分支
+	if payload.has("path"):
+		_handle_generate_path(payload, batch_id, req_id, ws)
+		return
+	# generate（单件）
 	var shape: String = String(payload.get("shape", ""))
 	var mesh = AssetFactory.create_mesh(shape, payload.get("params", {}))
 	if mesh == null:
@@ -129,3 +133,93 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 		EditorInterface.mark_scene_as_unsaved()
 	else:
 		_server.send_result(req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws)
+
+
+# generate_path 编排：parse → validate → sample → 复用 place 循环（共享 batch_id，per-point 散回执）
+func _handle_generate_path(
+	payload: Dictionary, batch_id: int, req_id: String, ws: WebSocketPeer
+) -> void:
+	var parsed: Dictionary = PathGenerator.parse_path(payload.get("path", []))
+	if String(parsed["error"]) != "":
+		_server.send_result(
+			req_id, false, {"error": "invalid_params", "message": String(parsed["error"])}, ws
+		)
+		return
+	var points: Array = parsed["points"]
+	var spacing: float = float(payload.get("spacing", 0.0))
+	var count: int = int(payload.get("count", 0))
+	var align: String = String(payload.get("align", "path"))
+	var include_endpoints: bool = bool(payload.get("include_endpoints", true))
+	var verr: String = PathGenerator.validate(points, spacing, count, align, include_endpoints)
+	if verr != "":
+		_server.send_result(req_id, false, {"error": "invalid_params", "message": verr}, ws)
+		return
+	var samples: Array = PathGenerator.sample(points, spacing, count, align, include_endpoints)
+	if samples.size() > _Server.BATCH_LIMIT:
+		_server.send_result(
+			req_id,
+			false,
+			{
+				"error": "invalid_params",
+				"message":
+				"samples 上限 %d，实际 %d（缩短路径/增大 spacing/减少 count）"
+				% [_Server.BATCH_LIMIT, samples.size()]
+			},
+			ws
+		)
+		return
+	var shape: String = String(payload.get("shape", ""))
+	var mesh = AssetFactory.create_mesh(shape, payload.get("params", {}))
+	if mesh == null:
+		_server.send_result(
+			req_id,
+			false,
+			{
+				"error": "unsupported_shape",
+				"message":
+				(
+					"未知 shape: %s（支持 box/cylinder/sphere/prism/wall/ramp/cone/tube/torus/stairs/fence）"
+					% shape
+				)
+			},
+			ws
+		)
+		return
+	var material = AssetFactory.create_material(payload.get("material", null))
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
+		_server.send_result(
+			req_id, false, {"error": "no_active_scene", "message": "无活动场景"}, ws
+		)
+		return
+	var base_name: String = String(payload.get("name", ""))
+	if base_name == "":
+		base_name = shape
+	for i in samples.size():
+		var s: Dictionary = samples[i]
+		var pos: Vector3 = s["position"]
+		var rot: Vector3 = s["rotation_deg"]
+		var place_payload := {
+			"name": "%s_%d" % [base_name, i],
+			"transform":
+			{"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
+			"parent": payload.get("parent", ""),
+			"save": payload.get("save", false),
+		}
+		var r := ScenePlacer.place(root, mesh, material, place_payload, _undo_stack, batch_id)
+		if bool(r["success"]):
+			_server.send_result(
+				req_id,
+				true,
+				{"node_path": String(r["node_path"]), "resource_path": String(r["resource_path"])},
+				ws
+			)
+			if _dock:
+				_dock.add_to_generated_list(
+					String(place_payload["name"]), String(r["node_path"])
+				)
+		else:
+			_server.send_result(
+				req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws
+			)
+	EditorInterface.mark_scene_as_unsaved()
