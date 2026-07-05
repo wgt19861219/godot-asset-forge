@@ -19,6 +19,7 @@ const MSG_PONG := "pong"
 const MSG_GENERATE := "generate"
 const MSG_GENERATE_BATCH := "generate_batch"
 const MSG_GENERATE_RESULT := "generate_result"
+const MSG_GENERATE_PATH := "generate_path"
 const MSG_UNDO_LAST := "undo_last"
 const TOKEN_FILE := "user://asset_forge.token"
 
@@ -248,6 +249,14 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				var p: Dictionary = it
 				p["__req_id"] = req_id
 				command_received.emit(p, _batch_counter, ws)
+		MSG_GENERATE_PATH:
+			if not client.get("authed", false):
+				send_unauthorized_and_close(ws)
+				return
+			_batch_counter += 1  # 一次 path 请求 = 一个 batch_id
+			var gp: Dictionary = obj.get("payload", {})
+			gp["__req_id"] = req_id
+			command_received.emit(gp, _batch_counter, ws)
 		MSG_UNDO_LAST:
 			if not client.get("authed", false):
 				send_unauthorized_and_close(ws)

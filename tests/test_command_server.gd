@@ -224,6 +224,32 @@ func run(runner) -> void:
 	)
 	for c in fill_clients:
 		c.close()
+	# === generate_path：emit command_received 共享同一 batch_id（与 generate 同语义）===
+	recv.clear()
+	ws2.send_text(
+		JSON.stringify(
+			{
+				"type": "generate_path",
+				"id": "rp",
+				"payload":
+					{"shape": "cylinder", "path": [[0, 0, 0], [1, 0, 0]], "count": 2, "name": "rp_test"}
+			}
+		)
+	)
+	for i in 30:
+		ws2.poll()
+		server.poll()
+		if not recv.is_empty():
+			break
+		OS.delay_msec(20)
+	runner.check(
+		not recv.is_empty() and recv[0]["payload"].get("path") != null,
+		"generate_path → command_received 含 path payload"
+	)
+	runner.check(int(recv[0]["batch"]) > 0, "generate_path batch_id > 0（共享 batch 语义）")
+	runner.check(
+		String(recv[0]["payload"].get("__req_id")) == "rp", "generate_path __req_id 透传"
+	)
 	server.stop()
 	DirAccess.remove_absolute(token_path)
 
