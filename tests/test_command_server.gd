@@ -272,6 +272,28 @@ func run(runner) -> void:
 		not recv.is_empty() and String(recv[0]["payload"].get("mode", "")) == "continuous",
 		"generate_path mode 字段透传（command_server 零改动）"
 	)
+	# === v3：path_node 字段透传（command_server 零改动验证；result total 端到端靠 Step 4 手测）===
+	recv.clear()
+	ws2.send_text(
+		JSON.stringify(
+			{
+				"type": "generate_path",
+				"id": "rpn",
+				"payload":
+					{"shape": "wall", "path_node": "/Root/NonExist", "count": 3, "mode": "continuous"}
+			}
+		)
+	)
+	for i in 30:
+		ws2.poll()
+		server.poll()
+		if not recv.is_empty():
+			break
+		OS.delay_msec(20)
+	runner.check(
+		not recv.is_empty() and String(recv[0]["payload"].get("path_node")) == "/Root/NonExist",
+		"generate_path path_node 字段透传（command_server 零改动）"
+	)
 	server.stop()
 	DirAccess.remove_absolute(token_path)
 

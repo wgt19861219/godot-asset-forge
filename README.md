@@ -62,6 +62,10 @@ python tools/forge_client.py path box --path '[[0,0,0],[10,0,0]]' --count 5 --ma
 python tools/forge_client.py path wall --path '[[0,0,0],[5,0,0],[5,0,5]]' --mode continuous --count 5 --mat stone
 python tools/forge_client.py path fence --path '[[0,0,0],[10,0,0]]' --mode continuous --spacing 2 --mat wood
 
+# Path3D 节点输入（编辑器画曲线 → bash 引用）
+python tools/forge_client.py path cylinder --path-node /Root/MyPath --count 8 --mat metal
+python tools/forge_client.py path fence --path-node /Root/FencePath --spacing 2 --mode continuous --mat wood
+
 # 存为 .tscn 预制件
 python tools/forge_client.py box --save --name pillar
 
@@ -95,6 +99,7 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 |------|------|
 | `--path '[[x,y,z],...]'` | 折线点列表（≥2 点） |
 | `--path-file <file>` | 从 JSON 文件读 path |
+| `--path-node <节点路径>` | 引用场景里的 Path3D 节点（与 `--path`/`--path-file` 互斥，v3） |
 | `--spacing <米>` | 等间距采样（与 `--count` 互斥） |
 | `--count <N>` | 等数量采样（含两端 N-1 等分） |
 | `--align none\|path\|normal` | 朝向：不转 / 沿切线 / 切线+90°（默认 path） |
@@ -103,6 +108,8 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 **朝向注记**：`align=path` 基于「物件正面 -Z、XZ 地平面、Y up」假设。旋转对称物件（box/cylinder/sphere/prism/cone/tube/torus）无视觉差异；**方向敏感物件**（fence/wall 长度沿 X、stairs 上行沿 +Z）用 `align=path` 朝向会偏 90°——离散摆放适合对称物件，方向敏感件的连续铺设留待 v2。
 
 **continuous 模式**：栏板（wall/fence）沿路径首尾相连铺满，length 自适应段长，仅支持 wall/fence（length 沿 X）。fence 段接缝端柱重合会 z-fighting（preview 级，生产用 discrete 或待 v3 去重）。
+
+**Path3D 节点输入（v3）**：`--path-node` 引用场景里的 Path3D 节点（curve 已平滑，baked_points 即密集折线，无需自实现 Catmull-Rom）。节点必须在当前活动场景；建议 parent 留空（非 root parent 会坐标错位）。超长曲线 baked_points 密度无上限（BATCH_LIMIT 只护物件数不护输入点数），极长路径建议先简化曲线。
 
 ## 材质
 

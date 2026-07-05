@@ -71,13 +71,17 @@ token 正确 → `{"type":"handshake_ack","payload":{"server":"asset_forge","god
 ```
 
 - `path` 必填（≥2 点，每点 `[x,y,z]`）；`spacing` / `count` 二选一；`align` 默认 `"path"`（none/path/normal）；`include_endpoints` 默认 `true`
+- `path_node`：可选，Path3D 节点路径（如 `/Root3D/MyPath`），与 `path` 互斥。plugin 读 `curve.get_baked_points()` + `to_global` 作为 path
 - `mode`：`"discrete"`（默认，v1 等间距独立物件）或 `"continuous"`（栏板首尾相连铺满，仅 wall/fence，length 自适应段长，align 强制 path）
 - **采样规则**：`spacing` = 等间距（含端点补尾点）；`count` = 等数量（含两端 N-1 等分）；`count==1` 时 `include_endpoints` 必须为 `false`（单点居中）
 - **朝向**：`yaw = atan2(-tangent.x, -tangent.z)`；`none`=不转、`path`=沿切线、`normal`=切线+90°（路径前进方向左侧法线）
 - **回执**：N 条独立 `generate_result` 共享同一 `req_id`（与 `generate_batch` 同语义，per-point 散）
+- **回执 total 字段**：每条 `generate_result` 的 result envelope 含 `total`：int，采样点总数（discrete = 物件数 / continuous = 段数）。客户端可收第一条读 total 收齐（D 方案，path_node + spacing 模式必需）
 - **undo**：所有采样点共享一个 batch_id，一条 `undo_last` 全删
 
 **continuous 模式**：栏板（wall/fence）沿路径铺满，每段 length = 弦长（自适应间距），朝向 +X 对齐段弦方向。spacing 模式段数 = v1 点数 − 1；count 模式段数 = N（独立等分，不复用 v1 边界）。fence 段接缝端柱重合 z-fighting 为 preview 级瑕疵（v3 去重）。
+
+**path_node 模式（v3）**：引用场景里的 Path3D 节点，读其 curve 的 baked_points（Godot 已 tessellate 的密集点）+ to_global（局部→世界）作为 path。Path3D 节点必须在当前活动场景内（同 parent 约束）。建议 parent 留空（默认 root）；指定非 root parent 时，物件位置 = Path3D 世界坐标被当 parent 局部，parent 非原点会错位（与 path JSON 既有行为一致）。错误分支：节点不存在 / 非 Path3D / curve null / baked<2 → `invalid_params`。
 
 错误码：path<2 点 / total_len=0 / spacing/count 缺失·非正·互斥违反 / `count==1`+endpoints / samples>BATCH_LIMIT → 一律 `invalid_params` + message；复用 `unsupported_shape` / `no_active_scene` / `parent_not_found`。
 
