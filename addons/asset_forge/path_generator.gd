@@ -25,9 +25,12 @@ static func parse_path(raw: Variant) -> Dictionary:
 
 
 # 输入退化校验 → 错误描述字符串（空串 = 合法）
+# mode: "discrete"（v1 默认，零回归）/ "continuous"（v2 段阵列）
 static func validate(
-	points: Array, spacing: float, count: int, align: String, include_endpoints: bool
+	points: Array, spacing: float, count: int, align: String, include_endpoints: bool, mode := "discrete"
 ) -> String:
+	if mode != "discrete" and mode != "continuous":
+		return "mode 必须 discrete|continuous"
 	if align != "none" and align != "path" and align != "normal":
 		return "align 必须是 none/path/normal"
 	if points.size() < 2:
@@ -41,15 +44,23 @@ static func validate(
 		return "spacing 与 count 只能二选一"
 	if not has_spacing and not has_count:
 		return "必须提供 spacing（>0）或 count（>=1）之一"
-	if has_count and count == 1 and include_endpoints:
+	# F5：count=1 + endpoints 仅 discrete 模式拦截（continuous count=1 = 1 段，合法）
+	if mode == "discrete" and has_count and count == 1 and include_endpoints:
 		return "count==1 时 include_endpoints 必须为 false（含两端至少 2 个采样点）"
+	# continuous：align 强制 path（length 沿 chord）
+	if mode == "continuous" and align != "path":
+		return "continuous align 强制 path（length 沿 chord），当前 " + align
 	return ""
 
 
 # 已 valid 的输入 → 采样点列表 [{"position":Vector3,"rotation_deg":Vector3,"distance":float}, ...]
+# mode="discrete"（v1）：返回顶点采样点（含 miter 切线）。
+# mode="continuous"：返回段数组 [{position, rotation_deg, length, distance}]（每段沿 chord）。
 static func sample(
-	points: Array, spacing: float, count: int, align: String, include_endpoints: bool
+	points: Array, spacing: float, count: int, align: String, include_endpoints: bool, mode := "discrete"
 ) -> Array:
+	if mode == "continuous":
+		return _sample_continuous(points, spacing, count, include_endpoints)
 	var last: int = points.size() - 1
 	var seg_len: Array = []
 	var vertex_d: Array = [0.0]  # vertex_d[i] = 顶点 i 的累计弧长
@@ -76,6 +87,64 @@ static func sample(
 			rot = Vector3(0.0, yaw + 90.0, 0.0)
 		samples.append({"position": pos, "rotation_deg": rot, "distance": d})
 	return samples
+
+
+# continuous 模式：段 = 弧长边界相邻对，每段返回 {position, rotation_deg, length, distance}
+# - count 模式：N 等长段（step=total/N），段数=N
+# - spacing 模式：每 spacing 一段，段数=v1 离散点数 - 1
+# - yaw=atan2(-chord.z, chord.x)（+X 对齐 chord，与 discrete 的切线 miter 不同）
+# - 零长段（length<_EPS）跳过
+static func _sample_continuous(
+	points: Array, spacing: float, count: int, include_endpoints: bool
+) -> Array:
+	var last: int = points.size() - 1
+	var seg_len: Array = []
+	var vertex_d: Array = [0.0]
+	var acc := 0.0
+	for i in last:
+		var l: float = (points[i] as Vector3).distance_to(points[i + 1] as Vector3)
+		seg_len.append(l)
+		acc += l
+		vertex_d.append(acc)
+	var total: float = acc
+	# 段边界
+	var boundaries: Array = []
+	if spacing > 0.0:
+		var d := 0.0
+		while d <= total + _EPS:
+			boundaries.append(d)
+			d += spacing
+		if include_endpoints and (total - float(boundaries[boundaries.size() - 1])) > _EPS:
+			boundaries.append(total)
+	elif count >= 1:
+		if count == 1:
+			boundaries = [0.0, total]
+		else:
+			var step := total / float(count)
+			for i in range(count + 1):
+				boundaries.append(step * float(i))
+	# 段 = 相邻边界对
+	var segments: Array = []
+	for i in range(boundaries.size() - 1):
+		var d_start: float = float(boundaries[i])
+		var d_end: float = float(boundaries[i + 1])
+		var p_start := _position_at(d_start, seg_len, points, total)
+		var p_end := _position_at(d_end, seg_len, points, total)
+		var length: float = p_start.distance_to(p_end)
+		if length < _EPS:
+			continue  # 零长段跳过（不计 predict_n、不 place）
+		var position := p_start.lerp(p_end, 0.5)
+		var chord := p_end - p_start
+		var yaw := rad_to_deg(atan2(-chord.z, chord.x))  # +X 对齐 chord
+		segments.append(
+			{
+				"position": position,
+				"rotation_deg": Vector3(0.0, yaw, 0.0),  # continuous 强制 align=path
+				"length": length,
+				"distance": d_start
+			}
+		)
+	return segments
 
 
 # --- helpers ---

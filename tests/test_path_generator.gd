@@ -134,3 +134,59 @@ func run(runner) -> void:
 		PathGenerator.sample(line, 3.0, 0, "path", false).size() == 2,
 		"parity: spacing=3 total=4 no endpoints → 2"
 	)
+
+	# === continuous mode ===
+	# count 模式 N 等长段（line total=4，count=4 → 4 段，length=total/N=1.0）
+	var c1 := PathGenerator.sample(line, 0.0, 4, "path", true, "continuous")
+	runner.check(c1.size() == 4, "continuous count=4 → 4 段")
+	runner.check(abs(float(c1[0]["length"]) - 1.0) < 0.001, "continuous count 段长 = total/N")
+	runner.check(
+		abs((c1[0]["position"] as Vector3).x - 0.5) < 0.001, "continuous 段 0 中心 x=0.5"
+	)
+	runner.check(
+		abs((c1[3]["position"] as Vector3).x - 3.5) < 0.001, "continuous 段 3 中心 x=3.5"
+	)
+	# continuous yaw：+X 沿 chord（line 沿 +X，chord=(1,0,0) → yaw=atan2(0,1)=0°）
+	runner.check(
+		abs((c1[0]["rotation_deg"] as Vector3).y - 0.0) < 0.1,
+		"continuous +X 路径 yaw=0（+X 对齐 chord，与 discrete -90 差 90°）"
+	)
+	# L 形 continuous（转角在段接缝，非 miter）
+	var cL := PathGenerator.sample(L, 0.0, 2, "path", true, "continuous")  # L total=2，2 段
+	runner.check(cL.size() == 2, "continuous L count=2 → 2 段")
+	runner.check(
+		abs((cL[0]["rotation_deg"] as Vector3).y - 0.0) < 0.1,
+		"continuous L 段 0 yaw=0（chord +X）"
+	)
+	runner.check(
+		abs((cL[1]["rotation_deg"] as Vector3).y - (-90.0)) < 0.1,
+		"continuous L 段 1 yaw=-90（chord +Z，转角在接缝）"
+	)
+	# spacing 模式 continuous（v1 点数 - 1）
+	var cs := PathGenerator.sample(line, 1.0, 0, "path", true, "continuous")  # v1 5 点 → 4 段
+	runner.check(cs.size() == 4, "continuous spacing=1 total=4 endpoints → 4 段（v1 点数 -1）")
+	runner.check(
+		abs(float(cs[0]["length"]) - 1.0) < 0.001, "continuous spacing 段长 = spacing"
+	)
+	# path 局部重合点（count 模式弧长等分，段数 = N，不受重合点影响）
+	var dup := [Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 0), Vector3(4, 0, 0)]
+	var cd := PathGenerator.sample(dup, 0.0, 3, "path", true, "continuous")  # total=4，3 等长段
+	runner.check(cd.size() == 3, "continuous 跨局部重合点（count 模式段数 = N）")
+	# === validate continuous ===
+	runner.check(
+		PathGenerator.validate(line, 1.0, 0, "none", true, "continuous") != "",
+		"validate continuous + align=none → invalid（强制 path）"
+	)
+	runner.check(
+		PathGenerator.validate(line, 0.0, 1, "path", true, "continuous") == "",
+		"validate continuous count=1 endpoints=true 合法（与 discrete F5 不同）"
+	)
+	runner.check(
+		PathGenerator.validate(line, 1.0, 0, "path", true, "sideways") != "",
+		"validate 非法 mode → invalid"
+	)
+	# discrete 默认 mode（v1 调用不传 mode，零回归）
+	runner.check(
+		PathGenerator.validate(line, 1.0, 0, "path", true) == "",
+		"validate 默认 mode=discrete（v1 零回归）"
+	)
