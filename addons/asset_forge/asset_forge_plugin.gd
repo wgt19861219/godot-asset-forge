@@ -79,8 +79,8 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 			ws
 		)
 		return
-	# generate_path（路径阵列，MVP）—— payload 含 path 走路径分支
-	if payload.has("path"):
+	# generate_path（路径阵列）—— v3：path 或 path_node 都触发 path 分支（v2 仅 path）
+	if payload.has("path") or payload.has("path_node"):
 		_handle_generate_path(payload, batch_id, req_id, ws)
 		return
 	# generate（单件）
@@ -148,13 +148,52 @@ func _handle_generate_path(
 			ws
 		)
 		return
-	var parsed: Dictionary = PathGenerator.parse_path(payload.get("path", []))
-	if String(parsed["error"]) != "":
+	# A1：root 提前取（path_node 解析 + 后续 place 都需 root；v2 的 root 取值从 sample 之后提到最前）
+	var root: Node = EditorInterface.get_edited_scene_root()
+	if root == null:
 		_server.send_result(
-			req_id, false, {"error": "invalid_params", "message": String(parsed["error"])}, ws
+			req_id, false, {"error": "no_active_scene", "message": "无活动场景"}, ws
 		)
 		return
-	var points: Array = parsed["points"]
+	# v3：path/path_node 互斥 + path 源分流
+	if payload.has("path") and payload.has("path_node"):
+		_server.send_result(
+			req_id,
+			false,
+			{"error": "invalid_params", "message": "path 与 path_node 互斥"},
+			ws
+		)
+		return
+	if not payload.has("path") and not payload.has("path_node"):
+		_server.send_result(
+			req_id,
+			false,
+			{"error": "invalid_params", "message": "必须提供 path 或 path_node 之一"},
+			ws
+		)
+		return
+	var points: Array
+	if payload.has("path_node"):
+		var resolved: Dictionary = ScenePlacer.resolve_path3d(
+			root, String(payload["path_node"])
+		)
+		if String(resolved["error"]) != "":
+			_server.send_result(
+				req_id,
+				false,
+				{"error": "invalid_params", "message": String(resolved["error"])},
+				ws
+			)
+			return
+		points = resolved["points"]
+	else:
+		var parsed: Dictionary = PathGenerator.parse_path(payload.get("path", []))
+		if String(parsed["error"]) != "":
+			_server.send_result(
+				req_id, false, {"error": "invalid_params", "message": String(parsed["error"])}, ws
+			)
+			return
+		points = parsed["points"]
 	var spacing: float = float(payload.get("spacing", 0.0))
 	var count: int = int(payload.get("count", 0))
 	var align: String = String(payload.get("align", "path"))
@@ -168,6 +207,19 @@ func _handle_generate_path(
 	var samples: Array = PathGenerator.sample(
 		points, spacing, count, align, include_endpoints, mode
 	)
+	# A7：samples 空（continuous 短曲线 0 段 / spacing 过大）→ invalid_params（防 client 卡死）
+	if samples.is_empty():
+		_server.send_result(
+			req_id,
+			false,
+			{
+				"error": "invalid_params",
+				"message":
+				"采样点为 0（路径太短 / spacing 过大 / continuous + total<spacing），无法生成"
+			},
+			ws
+		)
+		return
 	if samples.size() > _Server.BATCH_LIMIT:
 		_server.send_result(
 			req_id,
@@ -213,12 +265,6 @@ func _handle_generate_path(
 		)
 		return
 	var material = AssetFactory.create_material(payload.get("material", null))
-	var root: Node = EditorInterface.get_edited_scene_root()
-	if root == null:
-		_server.send_result(
-			req_id, false, {"error": "no_active_scene", "message": "无活动场景"}, ws
-		)
-		return
 	var base_name: String = String(payload.get("name", ""))
 	if base_name == "":
 		base_name = shape
@@ -226,8 +272,18 @@ func _handle_generate_path(
 		for i in samples.size():
 			var s: Dictionary = samples[i]
 			_place_one(
-				root, probe_mesh, material, base_name, i, s["position"], s["rotation_deg"],
-				payload, batch_id, req_id, ws
+				root,
+				probe_mesh,
+				material,
+				base_name,
+				i,
+				s["position"],
+				s["rotation_deg"],
+				payload,
+				batch_id,
+				samples.size(),  # v3：total
+				req_id,
+				ws
 			)
 	else:  # continuous：每段独立 create_mesh（length 注入）
 		for i in samples.size():
@@ -236,8 +292,18 @@ func _handle_generate_path(
 			seg_params["length"] = seg["length"]
 			var seg_mesh := AssetFactory.create_mesh(shape, seg_params)
 			_place_one(
-				root, seg_mesh, material, base_name, i, seg["position"], seg["rotation_deg"],
-				payload, batch_id, req_id, ws
+				root,
+				seg_mesh,
+				material,
+				base_name,
+				i,
+				seg["position"],
+				seg["rotation_deg"],
+				payload,
+				batch_id,
+				samples.size(),  # v3：total
+				req_id,
+				ws
 			)
 	EditorInterface.mark_scene_as_unsaved()
 
@@ -253,6 +319,7 @@ func _place_one(
 	rot_var: Variant,
 	payload: Dictionary,
 	batch_id: int,
+	total: int,  # v3 新增（D 方案：client 收第一条读 total 收齐）
 	req_id: String,
 	ws: WebSocketPeer
 ) -> void:
@@ -270,7 +337,11 @@ func _place_one(
 		_server.send_result(
 			req_id,
 			true,
-			{"node_path": String(r["node_path"]), "resource_path": String(r["resource_path"])},
+			{
+				"node_path": String(r["node_path"]),
+				"resource_path": String(r["resource_path"]),
+				"total": total  # v3 新增（D 方案：client 收第一条读 total 收齐）
+			},
 			ws
 		)
 		if _dock:
@@ -279,5 +350,8 @@ func _place_one(
 			)
 	else:
 		_server.send_result(
-			req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws
+			req_id,
+			false,
+			{"error": String(r["error"]), "message": "place 失败", "total": total},
+			ws
 		)
