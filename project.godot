@@ -1,6 +1,10 @@
 ; Engine configuration file.
-; Asset Forge 独立项目 minimal 壳（让插件能加载 + 测试能跑）。
-; 实际使用时把 addons/asset_forge 复制到你的 Godot 4.6 项目即可。
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
 
 config_version=5
 
