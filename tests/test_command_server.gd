@@ -250,6 +250,28 @@ func run(runner) -> void:
 	runner.check(
 		String(recv[0]["payload"].get("__req_id")) == "rp", "generate_path __req_id 透传"
 	)
+	# === generate_path mode 字段透传（command_server 零改动验证）===
+	recv.clear()
+	ws2.send_text(
+		JSON.stringify(
+			{
+				"type": "generate_path",
+				"id": "rpm",
+				"payload":
+					{"shape": "wall", "path": [[0, 0, 0], [4, 0, 0]], "count": 2, "mode": "continuous"}
+			}
+		)
+	)
+	for i in 30:
+		ws2.poll()
+		server.poll()
+		if not recv.is_empty():
+			break
+		OS.delay_msec(20)
+	runner.check(
+		not recv.is_empty() and String(recv[0]["payload"].get("mode", "")) == "continuous",
+		"generate_path mode 字段透传（command_server 零改动）"
+	)
 	server.stop()
 	DirAccess.remove_absolute(token_path)
 

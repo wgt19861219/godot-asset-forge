@@ -352,6 +352,33 @@ async def run_selftest(args):
     ok = bool(result.get("success")) and freed_n == 3
     all_ok = all_ok and ok
     print(f"{'PASS' if ok else 'FAIL'}  generate_path undo（freed 3）")
+    # generate_path continuous（wall 沿 L 路径铺满，N 段 → N 条 per-point result）
+    cont_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_cont",
+            "payload": {
+                "shape": "wall",
+                "path": [[0, 0, 0], [3, 0, 0], [3, 0, 3]],
+                "count": 3,
+                "mode": "continuous",
+                "material": "stone",
+                "name": "st_cont",
+            },
+        },
+        3,
+    )
+    ok = len(cont_results) == 3 and all(bool(r.get("success")) for r in cont_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous（{len(cont_results)}/3 result）")
+    # undo continuous（同 batch_id 原子弹 3 段）
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_cont_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 3
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous undo（freed 3）")
     await ws.close()
     sys.exit(0 if all_ok else 1)
 

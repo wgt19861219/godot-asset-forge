@@ -71,10 +71,13 @@ token 正确 → `{"type":"handshake_ack","payload":{"server":"asset_forge","god
 ```
 
 - `path` 必填（≥2 点，每点 `[x,y,z]`）；`spacing` / `count` 二选一；`align` 默认 `"path"`（none/path/normal）；`include_endpoints` 默认 `true`
+- `mode`：`"discrete"`（默认，v1 等间距独立物件）或 `"continuous"`（栏板首尾相连铺满，仅 wall/fence，length 自适应段长，align 强制 path）
 - **采样规则**：`spacing` = 等间距（含端点补尾点）；`count` = 等数量（含两端 N-1 等分）；`count==1` 时 `include_endpoints` 必须为 `false`（单点居中）
 - **朝向**：`yaw = atan2(-tangent.x, -tangent.z)`；`none`=不转、`path`=沿切线、`normal`=切线+90°（路径前进方向左侧法线）
 - **回执**：N 条独立 `generate_result` 共享同一 `req_id`（与 `generate_batch` 同语义，per-point 散）
 - **undo**：所有采样点共享一个 batch_id，一条 `undo_last` 全删
+
+**continuous 模式**：栏板（wall/fence）沿路径铺满，每段 length = 弦长（自适应间距），朝向 +X 对齐段弦方向。spacing 模式段数 = v1 点数 − 1；count 模式段数 = N（独立等分，不复用 v1 边界）。fence 段接缝端柱重合 z-fighting 为 preview 级瑕疵（v3 去重）。
 
 错误码：path<2 点 / total_len=0 / spacing/count 缺失·非正·互斥违反 / `count==1`+endpoints / samples>BATCH_LIMIT → 一律 `invalid_params` + message；复用 `unsupported_shape` / `no_active_scene` / `parent_not_found`。
 

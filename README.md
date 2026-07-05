@@ -58,6 +58,10 @@ python tools/forge_client.py batch --items '[{"shape":"box","name":"a"},{"shape"
 python tools/forge_client.py path cylinder --path '[[0,0,0],[5,0,0],[5,0,5]]' --spacing 1 --mat metal
 python tools/forge_client.py path box --path '[[0,0,0],[10,0,0]]' --count 5 --mat wood
 
+# continuous 模式（栏板铺满）
+python tools/forge_client.py path wall --path '[[0,0,0],[5,0,0],[5,0,5]]' --mode continuous --count 5 --mat stone
+python tools/forge_client.py path fence --path '[[0,0,0],[10,0,0]]' --mode continuous --spacing 2 --mat wood
+
 # 存为 .tscn 预制件
 python tools/forge_client.py box --save --name pillar
 
@@ -97,6 +101,8 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 | `--no-endpoints` | 不含端点（默认含） |
 
 **朝向注记**：`align=path` 基于「物件正面 -Z、XZ 地平面、Y up」假设。旋转对称物件（box/cylinder/sphere/prism/cone/tube/torus）无视觉差异；**方向敏感物件**（fence/wall 长度沿 X、stairs 上行沿 +Z）用 `align=path` 朝向会偏 90°——离散摆放适合对称物件，方向敏感件的连续铺设留待 v2。
+
+**continuous 模式**：栏板（wall/fence）沿路径首尾相连铺满，length 自适应段长，仅支持 wall/fence（length 沿 X）。fence 段接缝端柱重合会 z-fighting（preview 级，生产用 discrete 或待 v3 去重）。
 
 ## 材质
 
