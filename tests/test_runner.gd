@@ -11,6 +11,7 @@ var _failed: int = 0
 func _initialize() -> void:
 	_run_suite("AssetFactory", preload("res://tests/test_asset_factory.gd").new())
 	_run_suite("CustomMeshes", preload("res://tests/test_custom_meshes.gd").new())
+	_run_suite("PathGenerator", preload("res://tests/test_path_generator.gd").new())
 	_run_suite("ScenePlacer", preload("res://tests/test_scene_placer.gd").new())
 	_run_suite("CommandServer", preload("res://tests/test_command_server.gd").new())
 	print("\n=== Results: %d passed, %d failed ===" % [_passed, _failed])
