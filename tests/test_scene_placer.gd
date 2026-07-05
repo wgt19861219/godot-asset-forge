@@ -84,6 +84,84 @@ func run(runner) -> void:
 		)
 		runner.check_approx(pf64.position.y, 2.5, 0.001, "pf64 position.y = 2.5（A-1）")
 		runner.check_approx(pf64.position.z, 3.5, 0.001, "pf64 position.z = 3.5（A-1）")
+	# === ScenePlacer.resolve_path3d（v3 path_node）===
+	# 构造 root + Path3D + Curve3D（注：本 suite 已有变量 r3 = place 返回值，此处用 path_root 避免冲突）
+	var path_root := Node3D.new()
+	path_root.name = "PathTestRoot"
+	runner.root.add_child(path_root)
+	# #1 Path3D 在原点 → points == baked_points（局部=世界）
+	var p0 := Path3D.new()
+	p0.name = "Path0"
+	path_root.add_child(p0)
+	p0.curve = Curve3D.new()
+	p0.curve.add_point(Vector3(0, 0, 0))
+	p0.curve.add_point(Vector3(2, 0, 0))
+	p0.curve.add_point(Vector3(4, 0, 0))
+	var res0 := ScenePlacer.resolve_path3d(path_root, "Path0")
+	runner.check(res0["error"] == "", "resolve_path3d 原点 Path3D 无 error")
+	runner.check(res0["points"].size() >= 2, "resolve_path3d 返回 baked_points（>=2 点）")
+	runner.check(
+		(res0["points"][0] as Vector3).is_equal_approx(Vector3(0, 0, 0)),
+		"resolve_path3d 原点首点 = (0,0,0)"
+	)
+	# #2 Path3D 在 (10,0,0) → to_global 含位移
+	var p1 := Path3D.new()
+	p1.name = "Path1"
+	p1.position = Vector3(10, 0, 0)
+	path_root.add_child(p1)
+	p1.curve = Curve3D.new()
+	p1.curve.add_point(Vector3(0, 0, 0))
+	p1.curve.add_point(Vector3(2, 0, 0))
+	var res1 := ScenePlacer.resolve_path3d(path_root, "Path1")
+	runner.check(
+		(res1["points"][0] as Vector3).is_equal_approx(Vector3(10, 0, 0)),
+		"resolve_path3d to_global 含位移（首点 0,0,0 → 10,0,0）"
+	)
+	# #3 Path3D 旋转 90°（绕 Y）→ to_global 含旋转（取 baked 末点 ≈ 控制点 (2,0,0) 经旋转 → 世界 Z 轴 ±2）
+	var p2 := Path3D.new()
+	p2.name = "Path2"
+	p2.rotation = Vector3(0, deg_to_rad(90), 0)
+	path_root.add_child(p2)
+	p2.curve = Curve3D.new()
+	p2.curve.add_point(Vector3(0, 0, 0))
+	p2.curve.add_point(Vector3(2, 0, 0))  # 局部 +X，绕 Y +90° → 世界 -Z（右手系）
+	var res2 := ScenePlacer.resolve_path3d(path_root, "Path2")
+	var last2: Vector3 = res2["points"][res2["points"].size() - 1] as Vector3
+	runner.check(
+		abs(last2.z + 2.0) < 0.05 and abs(last2.x) < 0.05 and abs(last2.y) < 0.05,
+		"resolve_path3d to_global 含旋转（局部末点 (2,0,0) 绕 Y +90° → 世界 (0,0,-2)，baked 末点 ≈）"
+	)
+	# #4 curve == null
+	var p3 := Path3D.new()
+	p3.name = "Path3"
+	path_root.add_child(p3)
+	# p3.curve 默认 null（不设）
+	var res3 := ScenePlacer.resolve_path3d(path_root, "Path3")
+	runner.check(res3["error"] != "", "resolve_path3d curve 未设置 → error")
+	# #5 baked_points < 2（单点曲线）
+	var p4 := Path3D.new()
+	p4.name = "Path4"
+	path_root.add_child(p4)
+	p4.curve = Curve3D.new()
+	p4.curve.add_point(Vector3(0, 0, 0))  # 仅 1 点
+	var res4 := ScenePlacer.resolve_path3d(path_root, "Path4")
+	runner.check(res4["error"] != "", "resolve_path3d baked_points < 2 → error")
+	# #6 path_node 非 Path3D（MeshInstance3D）
+	var m := MeshInstance3D.new()
+	m.name = "NotPath"
+	path_root.add_child(m)
+	var res5 := ScenePlacer.resolve_path3d(path_root, "NotPath")
+	runner.check(
+		String(res5["error"]).find("必须是 Path3D") >= 0,
+		"resolve_path3d 非 Path3D → error 含「必须是 Path3D」"
+	)
+	# #7 节点名不存在
+	var res6 := ScenePlacer.resolve_path3d(path_root, "NotExist")
+	runner.check(
+		String(res6["error"]).find("未找到") >= 0, "resolve_path3d 节点不存在 → error 含「未找到」"
+	)
+	# 清理
+	path_root.queue_free()
 	# 清理 root
 	runner.root.remove_child(root)
 	root.free()

@@ -85,6 +85,26 @@ static func _resolve_parent(root: Node, parent_path: String) -> Node:
 	return root.get_node_or_null(NodePath(parent_path))
 
 
+# v3 path_node：读 Path3D 节点 → curve.baked_points → to_global（局部→世界）→ Array[Vector3]
+# 失败返 {"points": [], "error": "..."}；成功返 {"points": Array[Vector3], "error": ""}
+static func resolve_path3d(root: Node, path_node: String) -> Dictionary:
+	var node: Node = _resolve_parent(root, path_node)
+	if node == null:
+		return {"points": [], "error": "path_node 节点未找到: " + path_node}
+	if not (node is Path3D):
+		return {"points": [], "error": "path_node 必须是 Path3D 节点，实际类型: " + node.get_class()}
+	var path3d: Path3D = node as Path3D
+	if path3d.curve == null:
+		return {"points": [], "error": "Path3D curve 未设置（请在编辑器绘制曲线）"}
+	var baked: PackedVector3Array = path3d.curve.get_baked_points()
+	if baked.size() < 2:
+		return {"points": [], "error": "Path3D curve baked points < 2（需至少 2 点定义路径）"}
+	var points: Array = []
+	for v in baked:
+		points.append(path3d.to_global(v))  # 局部→世界坐标
+	return {"points": points, "error": ""}
+
+
 static func _unique_node_name(parent: Node, base_name: String) -> String:
 	var nm := base_name if not base_name.is_empty() else "asset"
 	if parent.get_node_or_null(NodePath(nm)) == null:

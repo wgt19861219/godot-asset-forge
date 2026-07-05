@@ -8,7 +8,18 @@ var _passed: int = 0
 var _failed: int = 0
 
 
+var _ran: bool = false
+
 func _initialize() -> void:
+	# 测试延迟到首帧 _process 跑，使 SceneTree.root（Window）已 attach、子 Node3D is_inside_tree=true。
+	# 否则 to_global / get_global_transform 在 _initialize 阶段报 "!is_inside_tree"。
+	pass
+
+
+func _process(_delta: float) -> bool:
+	if _ran:
+		return true
+	_ran = true
 	_run_suite("AssetFactory", preload("res://tests/test_asset_factory.gd").new())
 	_run_suite("CustomMeshes", preload("res://tests/test_custom_meshes.gd").new())
 	_run_suite("PathGenerator", preload("res://tests/test_path_generator.gd").new())
@@ -16,6 +27,7 @@ func _initialize() -> void:
 	_run_suite("CommandServer", preload("res://tests/test_command_server.gd").new())
 	print("\n=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
+	return true  # 主循环继续（quit 会退出，返回值无实际意义）
 
 
 func _run_suite(suite_name: String, suite: RefCounted) -> void:
