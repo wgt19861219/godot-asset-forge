@@ -1,12 +1,13 @@
 """forge_client.predict_n 与 GDScript PathGenerator.sample().size() parity（F2 同步约定）。
 基准来自 tests/test_path_generator.gd 的 parity 断言。"""
+import asyncio
 import math
 import sys
 from pathlib import Path
 
 # 让 tests/ 能 import tools/forge_client.py
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
-from forge_client import predict_n  # noqa: E402
+from forge_client import predict_n, send_and_recv_batch  # noqa: E402
 
 
 def _dist(a, b):
@@ -78,3 +79,41 @@ def test_continuous_multi_segment():
     # L 形 total=2，spacing=1 endpoints → v1 3 点 → continuous 2 段
     L = [[0, 0, 0], [1, 0, 0], [1, 0, 1]]
     assert predict_n(L, 1.0, 0, True, "continuous") == 2
+
+
+class _FakeWS:
+    """模拟 WebSocketPeer：按预置消息序列返回，记录 send 的消息。"""
+    def __init__(self, responses):
+        self._responses = list(responses)
+        self.sent = []
+
+    async def send(self, raw):
+        self.sent.append(raw)
+
+    async def recv(self):
+        await asyncio.sleep(0)
+        return self._responses.pop(0)
+
+
+def test_send_and_recv_batch_by_total():
+    """n=None：靠 result 第一条的 total 收齐（D 方案，path_node 模式）。"""
+    msgs = [
+        '{"type":"generate_result","id":"r","success":true,"node_path":"/a","total":3}',
+        '{"type":"generate_result","id":"r","success":true,"node_path":"/b","total":3}',
+        '{"type":"generate_result","id":"r","success":true,"node_path":"/c","total":3}',
+    ]
+    ws = _FakeWS([m.encode() for m in msgs])
+    results = asyncio.run(send_and_recv_batch(ws, {"type": "generate_path", "id": "r"}, n=None))
+    assert len(results) == 3
+    assert all(r["success"] for r in results)
+
+
+def test_send_and_recv_batch_n_compatible():
+    """n 传了：按 n 收齐（v1/v2 batch 兼容，result 不带 total）。"""
+    msgs = [
+        '{"type":"generate_result","id":"r","success":true,"node_path":"/a"}',
+        '{"type":"generate_result","id":"r","success":true,"node_path":"/b"}',
+    ]
+    ws = _FakeWS([m.encode() for m in msgs])
+    results = asyncio.run(send_and_recv_batch(ws, {"type": "generate_batch", "id": "r"}, n=2))
+    assert len(results) == 2

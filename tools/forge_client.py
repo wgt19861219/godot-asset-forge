@@ -87,24 +87,38 @@ async def send_and_recv(ws, msg, timeout=30.0):
             return data
 
 
-async def send_and_recv_batch(ws, msg, n):
-    """batch 专用：发 generate_batch，收齐 n 条同 req_id 的 generate_result。
-
-    server 对 batch 的每个 item 独立 emit 一条 generate_result（共享 req_id，
-    2026-07-04 Q7 宽松化），client 按 id 收齐 n 条后聚合。n = items 数。
+async def send_and_recv_batch(ws, msg, n=None):
+    """发 1 条，收齐 per-item result。
+    n=None（D 方案，generate_path）：靠 result 第一条的 total 收齐。
+    n 给定（v1/v2 batch 兼容）：按 n 收齐。
+    success=false（fatal error）：立即退出（不等 total/n）。
     """
     await ws.send(json.dumps(msg, ensure_ascii=False))
     req_id = msg.get("id")
     results = []
-    while len(results) < n:
-        # A-5：单次 recv 超时，防 server 静默时 while 死循环（收齐 n 条后正常退出）
+    total = n  # caller 传 n 则用 n（batch 兼容）；None 则靠 server total
+    while True:
         try:
             data = json.loads(await asyncio.wait_for(ws.recv(), timeout=30.0))
         except asyncio.TimeoutError:
-            print(f"等待 server 响应超时（30s 无消息），已收 {len(results)}/{n}，req_id={req_id}", file=sys.stderr)
+            print(
+                f"等待 server 响应超时（30s 无消息），已收 {len(results)}/{total}",
+                file=sys.stderr,
+            )
             sys.exit(5)
-        if data.get("type") == "generate_result" and data.get("id") == req_id:
+        if (
+            data.get("type") == "generate_result"
+            and data.get("id") == req_id
+        ):
             results.append(data)
+            # fatal error（success=false）→ 立即退出（不等 total/n）
+            if data.get("success") is False:
+                break
+            # 第一条读 server total（D 方案）
+            if total is None:
+                total = data.get("total")
+            if total is not None and len(results) >= int(total):
+                break
     return results
 
 
@@ -243,7 +257,12 @@ def build_path_payload(args, path):
     shape_name = args.shape
     if shape_name == "path" and args.batch_shapes:
         shape_name = args.batch_shapes[0]
-    payload = {"shape": shape_name, "path": path}
+    payload = {"shape": shape_name}
+    if args.path_node is not None:
+        payload["path_node"] = args.path_node
+    elif path is not None:
+        payload["path"] = path
+    # path/path_file/path_node 三互斥在 run_path 已校验，这里只构造
     if args.name:
         payload["name"] = args.name
     if args.mat:
@@ -284,30 +303,48 @@ def build_path_payload(args, path):
 
 
 async def run_path(args):
-    """path 阵列：客户端预测 n，发 generate_path，收齐 n 条 per-point result 聚合。"""
-    path = _parse_path_arg(args)
-    if path is None:
+    """path 阵列：path JSON 或 path_node（Path3D 节点）。
+    D 方案：n=None 靠 server result 的 total 收齐（predict_n 仅 path 模式预校验）。"""
+    # path 源解析 + 三互斥校验
+    path_sources = [args.path, args.path_file, args.path_node]
+    if sum(1 for s in path_sources if s is not None) > 1:
+        print("--path / --path-file / --path-node 三互斥", file=sys.stderr)
         sys.exit(2)
+    if args.path_node is not None:
+        path = None  # path_node 模式，client 不知曲线长
+    else:
+        path = _parse_path_arg(args)
+        if path is None:
+            sys.exit(2)
+
     spacing = args.spacing if args.spacing is not None else 0.0
     count = args.count if args.count is not None else 0
     include_endpoints = not args.no_endpoints
-    n = predict_n(path, spacing, count, include_endpoints, args.mode)
-    if n == 0:
-        print("path 参数错误：需 --spacing >0 或 --count >=1（且二选一）", file=sys.stderr)
-        sys.exit(2)
-    if n > 64:
-        print(
-            f"采样点 {n} 超过 BATCH_LIMIT 64（缩短路径/增大 spacing/减少 count）",
-            file=sys.stderr,
-        )
-        sys.exit(2)
+
+    # predict_n 仅 path 模式预校验（path_node 模式 client 不知 total_len，跳过，靠 server total）
+    if path is not None:
+        n = predict_n(path, spacing, count, include_endpoints, args.mode)
+        if n == 0:
+            print(
+                "path 参数错误：需 --spacing >0 或 --count >=1（且二选一）",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        if n > 64:
+            print(
+                f"采样点 {n} 超过 BATCH_LIMIT 64（缩短路径/增大 spacing/减少 count）",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
     ws = await connect_and_handshake(args)
     payload = build_path_payload(args, path)
+    # D 方案：n=None，靠 server result 的 total 字段收齐
     results = await send_and_recv_batch(
-        ws, {"type": "generate_path", "id": "r_path", "payload": payload}, n
+        ws, {"type": "generate_path", "id": "r_path", "payload": payload}, n=None
     )
     all_ok = all(bool(r.get("success")) for r in results)
-    aggregated = {"success": all_ok, "results": results, "count": n}
+    aggregated = {"success": all_ok, "results": results, "count": len(results)}
     print(json.dumps(aggregated, ensure_ascii=False))
     await ws.close()
     sys.exit(0 if all_ok else 1)
@@ -410,6 +447,11 @@ def main():
     p.add_argument("--align", default="path", choices=["none", "path", "normal"], help="path 模式：朝向（默认 path）")
     p.add_argument("--no-endpoints", action="store_true", help="path 模式：不含端点（默认含）")
     p.add_argument(
+        "--path-node",
+        default=None,
+        help="path 模式：场景里 Path3D 节点路径（如 /Root/MyPath），与 --path/--path-file 三互斥",
+    )
+    p.add_argument(
         "--mode",
         default="discrete",
         choices=["discrete", "continuous"],
@@ -422,7 +464,7 @@ def main():
         asyncio.run(run_undo(args)); return
     if args.shape == "batch":
         asyncio.run(run_batch(args)); return
-    if args.path is not None or args.path_file is not None:
+    if args.path is not None or args.path_file is not None or args.path_node is not None:
         asyncio.run(run_path(args)); return
     if not args.shape:
         p.error("需指定 shape，或 batch <shapes...>，或 undo，或 --selftest")
