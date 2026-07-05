@@ -47,3 +47,34 @@ def test_multi_segment():
     # L 形 total=2，spacing=1，endpoints → [0,1,2] = 3
     L = [[0, 0, 0], [1, 0, 0], [1, 0, 1]]
     assert predict_n(L, 1.0, 0, True) == 3
+
+
+def test_continuous_count_unchanged():
+    # count 模式 continuous = N（同 v1）
+    line = [[0, 0, 0], [4, 0, 0]]
+    assert predict_n(line, 0.0, 5, True, "continuous") == 5
+
+
+def test_continuous_spacing_minus_one():
+    # spacing 模式 continuous = v1 点数 - 1（v1=5 点 → 4 段）
+    line = [[0, 0, 0], [4, 0, 0]]
+    assert predict_n(line, 1.0, 0, True, "continuous") == 4
+
+
+def test_continuous_spacing_no_endpoints():
+    # v1 spacing=3 no endpoints = [0,3] = 2 点 → continuous = 1 段
+    line = [[0, 0, 0], [4, 0, 0]]
+    assert predict_n(line, 3.0, 0, False, "continuous") == 1
+
+
+def test_discrete_default_mode_zero_regression():
+    # 不传 mode，默认 discrete = v1 行为（v1 6 pytest 零回归）
+    line = [[0, 0, 0], [4, 0, 0]]
+    assert predict_n(line, 1.0, 0, True) == 5
+    assert predict_n(line, 0.0, 5, True) == 5
+
+
+def test_continuous_multi_segment():
+    # L 形 total=2，spacing=1 endpoints → v1 3 点 → continuous 2 段
+    L = [[0, 0, 0], [1, 0, 0], [1, 0, 1]]
+    assert predict_n(L, 1.0, 0, True, "continuous") == 2

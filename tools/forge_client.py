@@ -31,9 +31,9 @@ TOKEN_FILENAME = "asset_forge.token"
 SHAPES_11 = ["box", "cylinder", "sphere", "prism", "wall", "ramp", "cone", "tube", "torus", "stairs", "fence"]
 
 
-def predict_n(path, spacing, count, include_endpoints):
-    """与 PathGenerator._distances 镜像（F1 同步约定，ε=1e-4）。
-    返回采样点数，供 send_and_recv_batch 预定接收数。"""
+def predict_n(path, spacing, count, include_endpoints, mode="discrete"):
+    """与 PathGenerator._distances 镜像（ε=1e-4 同步约定）。
+    continuous 模式 spacing：N 点 → N-1 段；count/discrete 不变。"""
     total = sum(_dist(p0, p1) for p0, p1 in zip(path, path[1:]))
     eps = 1e-4
     if spacing and spacing > 0:
@@ -44,7 +44,10 @@ def predict_n(path, spacing, count, include_endpoints):
             d += spacing
         if include_endpoints and (total - distances[-1]) > eps:
             distances.append(total)
-        return len(distances)
+        n = len(distances)
+        if mode == "continuous":
+            n = max(0, n - 1)
+        return n
     elif count and count >= 1:
         return count
     return 0
@@ -260,6 +263,8 @@ def build_path_payload(args, path):
         payload["align"] = args.align
     if args.no_endpoints:
         payload["include_endpoints"] = False
+    if args.mode != "discrete":
+        payload["mode"] = args.mode
     if args.parent:
         payload["parent"] = args.parent
     if args.save:
@@ -286,7 +291,7 @@ async def run_path(args):
     spacing = args.spacing if args.spacing is not None else 0.0
     count = args.count if args.count is not None else 0
     include_endpoints = not args.no_endpoints
-    n = predict_n(path, spacing, count, include_endpoints)
+    n = predict_n(path, spacing, count, include_endpoints, args.mode)
     if n == 0:
         print("path 参数错误：需 --spacing >0 或 --count >=1（且二选一）", file=sys.stderr)
         sys.exit(2)
@@ -377,6 +382,12 @@ def main():
     p.add_argument("--count", type=int, default=None, help="path 模式：等数量采样（与 --spacing 互斥）")
     p.add_argument("--align", default="path", choices=["none", "path", "normal"], help="path 模式：朝向（默认 path）")
     p.add_argument("--no-endpoints", action="store_true", help="path 模式：不含端点（默认含）")
+    p.add_argument(
+        "--mode",
+        default="discrete",
+        choices=["discrete", "continuous"],
+        help="path 模式：discrete（默认，等间距独立物件）/ continuous（栏板铺满）",
+    )
     args = p.parse_args()
     if args.selftest:
         asyncio.run(run_selftest(args)); return
