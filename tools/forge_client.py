@@ -12,6 +12,7 @@
 import argparse
 import asyncio
 import json
+import math
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,29 @@ TOKEN_FILENAME = "asset_forge.token"
 
 # 与 tests/test_asset_factory.gd 的 shapes 名逐字一致
 SHAPES_11 = ["box", "cylinder", "sphere", "prism", "wall", "ramp", "cone", "tube", "torus", "stairs", "fence"]
+
+
+def predict_n(path, spacing, count, include_endpoints):
+    """与 PathGenerator._distances 镜像（F1 同步约定，ε=1e-4）。
+    返回采样点数，供 send_and_recv_batch 预定接收数。"""
+    total = sum(_dist(p0, p1) for p0, p1 in zip(path, path[1:]))
+    eps = 1e-4
+    if spacing and spacing > 0:
+        distances = []
+        d = 0.0
+        while d <= total + eps:
+            distances.append(d)
+            d += spacing
+        if include_endpoints and (total - distances[-1]) > eps:
+            distances.append(total)
+        return len(distances)
+    elif count and count >= 1:
+        return count
+    return 0
+
+
+def _dist(a, b):
+    return math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
 
 
 def resolve_token_path(args):
@@ -189,6 +213,97 @@ async def run_batch(args):
     sys.exit(0 if all_ok else 1)
 
 
+def _parse_path_arg(args):
+    """从 --path JSON 或 --path-file 读 path 数组，失败 → None（已打印错误）。"""
+    import json as _json
+    raw = None
+    if args.path is not None:
+        try:
+            raw = _json.loads(args.path)
+        except _json.JSONDecodeError as e:
+            print(f"--path JSON 解析失败: {e}", file=sys.stderr)
+            return None
+    elif args.path_file is not None:
+        try:
+            raw = _json.loads(Path(args.path_file).read_text(encoding="utf-8"))
+        except (OSError, _json.JSONDecodeError) as e:
+            print(f"--path-file 读取/解析失败: {e}", file=sys.stderr)
+            return None
+    if not isinstance(raw, list) or len(raw) < 2:
+        print("--path 必须是 ≥2 个点的 JSON 数组", file=sys.stderr)
+        return None
+    return raw
+
+
+def build_path_payload(args, path):
+    payload = {"shape": args.shape, "path": path}
+    if args.name:
+        payload["name"] = args.name
+    if args.mat:
+        if args.mat.startswith("{"):
+            try:
+                payload["material"] = json.loads(args.mat)
+            except json.JSONDecodeError as e:
+                print(f"--mat JSON 解析失败: {e}", file=sys.stderr)
+                sys.exit(2)
+        else:
+            payload["material"] = args.mat
+    if args.spacing is not None:
+        payload["spacing"] = args.spacing
+    if args.count is not None:
+        payload["count"] = args.count
+    if args.align != "path":
+        payload["align"] = args.align
+    if args.no_endpoints:
+        payload["include_endpoints"] = False
+    if args.parent:
+        payload["parent"] = args.parent
+    if args.save:
+        payload["save"] = True
+    params = {}
+    if args.size:
+        params["size"] = list(args.size)
+    if args.radius is not None:
+        params["radius"] = args.radius
+    if args.height is not None:
+        params["height"] = args.height
+    if args.thickness is not None:
+        params["thickness"] = args.thickness
+    if params:
+        payload["params"] = params
+    return payload
+
+
+async def run_path(args):
+    """path 阵列：客户端预测 n，发 generate_path，收齐 n 条 per-point result 聚合。"""
+    path = _parse_path_arg(args)
+    if path is None:
+        sys.exit(2)
+    spacing = args.spacing if args.spacing is not None else 0.0
+    count = args.count if args.count is not None else 0
+    include_endpoints = not args.no_endpoints
+    n = predict_n(path, spacing, count, include_endpoints)
+    if n == 0:
+        print("path 参数错误：需 --spacing >0 或 --count >=1（且二选一）", file=sys.stderr)
+        sys.exit(2)
+    if n > 64:
+        print(
+            f"采样点 {n} 超过 BATCH_LIMIT 64（缩短路径/增大 spacing/减少 count）",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    ws = await connect_and_handshake(args)
+    payload = build_path_payload(args, path)
+    results = await send_and_recv_batch(
+        ws, {"type": "generate_path", "id": "r_path", "payload": payload}, n
+    )
+    all_ok = all(bool(r.get("success")) for r in results)
+    aggregated = {"success": all_ok, "results": results, "count": n}
+    print(json.dumps(aggregated, ensure_ascii=False))
+    await ws.close()
+    sys.exit(0 if all_ok else 1)
+
+
 async def run_selftest(args):
     ws = await connect_and_handshake(args)
     all_ok = True
@@ -224,6 +339,13 @@ def main():
     p.add_argument("--height", type=float, default=None)
     p.add_argument("--thickness", type=float, default=None)
     p.add_argument("--godot-user-dir", default=None, help="Godot user:// 绝对路径（覆盖 env/默认）")
+    # path 子命令参数
+    p.add_argument("--path", default=None, help='path 模式：JSON 数组 [[x,y,z],...] 如 \'[[0,0,0],[3,0,0]]\'')
+    p.add_argument("--path-file", default=None, help="path 模式：从文件读 path JSON（每点一行或 JSON 数组）")
+    p.add_argument("--spacing", type=float, default=None, help="path 模式：等间距采样（与 --count 互斥）")
+    p.add_argument("--count", type=int, default=None, help="path 模式：等数量采样（与 --spacing 互斥）")
+    p.add_argument("--align", default="path", choices=["none", "path", "normal"], help="path 模式：朝向（默认 path）")
+    p.add_argument("--no-endpoints", action="store_true", help="path 模式：不含端点（默认含）")
     args = p.parse_args()
     if args.selftest:
         asyncio.run(run_selftest(args)); return
@@ -231,6 +353,8 @@ def main():
         asyncio.run(run_undo(args)); return
     if args.shape == "batch":
         asyncio.run(run_batch(args)); return
+    if args.path is not None or args.path_file is not None:
+        asyncio.run(run_path(args)); return
     if not args.shape:
         p.error("需指定 shape，或 batch <shapes...>，或 undo，或 --selftest")
     asyncio.run(run_generate(args))
