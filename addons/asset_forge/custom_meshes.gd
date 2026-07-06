@@ -132,19 +132,35 @@ static func make_stairs(params: Dictionary) -> ArrayMesh:
 	return st.commit()
 
 
+# v5 fence 柱 x 坐标列表（纯函数，可单测）。posts = 满配柱数；
+# start_post/end_post=false 时跳过首/末柱。剩余柱仍按 t=i/(posts-1) 取（跳过端点索引，柱间距不变）。
+# posts=1 走 t=0.0 特例（避免 posts-1=0 除零），x=-length/2（左端，make_fence 既有行为，v5 保留）。
+static func _post_xs(length: float, posts: int, start_post: bool, end_post: bool) -> Array:
+	var xs: Array = []
+	for i in posts:
+		if i == 0 and not start_post:
+			continue
+		if i == posts - 1 and not end_post:
+			continue
+		var t: float = 0.0 if posts == 1 else float(i) / float(posts - 1)
+		xs.append((t - 0.5) * length)
+	return xs
+
+
 # --- fence 栅栏（柱 + 横档 → 单 ArrayMesh，A3）---
+# v5：柱循环改为调 _post_xs 纯函数；start_post/end_post 控制首/末柱（continuous 端柱共享，默认 true 零回归）
 static func make_fence(params: Dictionary) -> ArrayMesh:
 	var length: float = float(params.get("length", 3.0))
 	var height: float = float(params.get("height", 1.2))
 	var posts: int = max(int(params.get("posts", 4)), 1)
 	var pr: float = float(params.get("post_radius", 0.05))
 	var rt: float = float(params.get("rail_thickness", 0.04))
+	var start_post: bool = bool(params.get("start_post", true))
+	var end_post: bool = bool(params.get("end_post", true))
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var seg := 12
-	for i in posts:
-		var t: float = 0.0 if posts == 1 else float(i) / float(posts - 1)
-		var x := (t - 0.5) * length
+	for x in _post_xs(length, posts, start_post, end_post):
 		_add_cylinder(st, Vector3(x, height / 2.0, 0.0), pr, height, seg)
 	_add_box(st, Vector3(0.0, height * 0.8, 0.0), Vector3(length, rt, rt))  # 上横档
 	_add_box(st, Vector3(0.0, height * 0.3, 0.0), Vector3(length, rt, rt))  # 下横档

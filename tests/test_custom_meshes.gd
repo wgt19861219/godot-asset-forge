@@ -76,3 +76,24 @@ func run(runner) -> void:
 		axis_aligned == box_normals.size(),
 		"box 法线全轴对齐（%d/%d，I-3：不再被平滑为对角线）" % [axis_aligned, box_normals.size()]
 	)
+	# v5 _post_xs 纯函数单测（fence 柱 x 坐标，端柱参数）
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 4, true, true), [-1.5, -0.5, 0.5, 1.5], "#1 默认满配")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 4, true, false), [-1.5, -0.5, 0.5], "#2 去末柱（continuous 非末段）")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 4, false, true), [-0.5, 0.5, 1.5], "#3 去首柱")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 4, false, false), [-0.5, 0.5], "#4 去首末")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 1, true, true), [-1.5], "#5 posts=1 走 t=0.0 特例（左端，make_fence 既有行为）")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 1, false, false), [], "#6 posts=1 全去 → 空列表（不崩）")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 2, true, true), [-1.5, 1.5], "#7 posts=2 两端柱")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 2, true, false), [-1.5], "#8 posts=2 去末")
+	_check_xs(runner, CustomMeshes._post_xs(3.0, 0, true, true), [], "#9 posts<1 → 空列表（不崩，信任上层 max(posts,1)）")
+
+
+# v5 _post_xs 单测辅助：逐元素 is_equal_approx 比较浮点数组（posts=4 含 t=1/3 → -0.5 浮点，不能直接 ==）
+func _check_xs(runner, actual: Array, expected: Array, label: String) -> void:
+	var ok: bool = actual.size() == expected.size()
+	if ok:
+		for i in actual.size():
+			if not is_equal_approx(float(actual[i]), float(expected[i])):
+				ok = false
+				break
+	runner.check(ok, "_post_xs %s：期望 %s，实际 %s" % [label, str(expected), str(actual)])
