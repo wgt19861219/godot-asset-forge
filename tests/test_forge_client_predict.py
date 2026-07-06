@@ -117,3 +117,32 @@ def test_send_and_recv_batch_n_compatible():
     ws = _FakeWS([m.encode() for m in msgs])
     results = asyncio.run(send_and_recv_batch(ws, {"type": "generate_batch", "id": "r"}, n=2))
     assert len(results) == 2
+
+
+def test_predict_n_va_l_shape_spacing3():
+    """va L 形 spacing=3 → 4 段（与 server test_path_generator #1 parity）"""
+    from forge_client import predict_n
+    path = [(0, 0, 0), (4, 0, 0), (4, 0, 4)]
+    assert predict_n(path, 3.0, 0, True, "continuous", align_vertices=True) == 4
+
+
+def test_predict_n_va_exact_division():
+    """va L 形 spacing=2 → 4 段（整除无短尾）"""
+    from forge_client import predict_n
+    path = [(0, 0, 0), (4, 0, 0), (4, 0, 4)]
+    assert predict_n(path, 2.0, 0, True, "continuous", align_vertices=True) == 4
+
+
+def test_predict_n_va_zero_length_segment():
+    """va 折线含零长段 → 2 段（零长段贡献 0，与 server #8 parity）"""
+    from forge_client import predict_n
+    path = [(0, 0, 0), (2, 0, 0), (2, 0, 0), (4, 0, 0)]
+    assert predict_n(path, 2.0, 0, True, "continuous", align_vertices=True) == 2
+
+
+def test_predict_n_va_false_legacy():
+    """va=False → 走 legacy（v1/v2，零回归）"""
+    from forge_client import predict_n
+    path = [(0, 0, 0), (4, 0, 0)]
+    # v2 continuous spacing=1 total=4 → 5 点 → 4 段
+    assert predict_n(path, 1.0, 0, True, "continuous", align_vertices=False) == 4

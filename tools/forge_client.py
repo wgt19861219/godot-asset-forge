@@ -31,11 +31,23 @@ TOKEN_FILENAME = "asset_forge.token"
 SHAPES_11 = ["box", "cylinder", "sphere", "prism", "wall", "ramp", "cone", "tube", "torus", "stairs", "fence"]
 
 
-def predict_n(path, spacing, count, include_endpoints, mode="discrete"):
-    """与 PathGenerator._distances 镜像（ε=1e-4 同步约定）。
-    continuous 模式 spacing：N 点 → N-1 段；count/discrete 不变。"""
+def predict_n(path, spacing, count, include_endpoints, mode="discrete", align_vertices=False):
+    """与 PathGenerator._distances/_sample_continuous 镜像（ε=1e-4 同步约定）。
+    v4 align_vertices：每折线段 floor(seg/spacing)+(余数>eps?1:0) 之和。"""
     total = sum(_dist(p0, p1) for p0, p1 in zip(path, path[1:]))
     eps = 1e-4
+    if align_vertices and mode == "continuous" and spacing and spacing > 0:
+        # v4 va：每折线段独立按 spacing 切 + 短尾
+        n = 0
+        for p0, p1 in zip(path, path[1:]):
+            seg = _dist(p0, p1)
+            if seg < eps:
+                continue  # 零长折线段贡献 0
+            full = int(seg // spacing)
+            n += full
+            if seg - full * spacing > eps:
+                n += 1  # 短尾段
+        return n
     if spacing and spacing > 0:
         distances = []
         d = 0.0
@@ -284,6 +296,8 @@ def build_path_payload(args, path):
         payload["include_endpoints"] = False
     if args.mode != "discrete":
         payload["mode"] = args.mode
+    if args.align_vertices:
+        payload["align_vertices"] = True
     if args.parent:
         payload["parent"] = args.parent
     if args.save:
@@ -323,7 +337,7 @@ async def run_path(args):
 
     # predict_n 仅 path 模式预校验（path_node 模式 client 不知 total_len，跳过，靠 server total）
     if path is not None:
-        n = predict_n(path, spacing, count, include_endpoints, args.mode)
+        n = predict_n(path, spacing, count, include_endpoints, args.mode, args.align_vertices)
         if n == 0:
             print(
                 "path 参数错误：需 --spacing >0 或 --count >=1（且二选一）",
@@ -456,6 +470,11 @@ def main():
         default="discrete",
         choices=["discrete", "continuous"],
         help="path 模式：discrete（默认，等间距独立物件）/ continuous（栏板铺满）",
+    )
+    p.add_argument(
+        "--align-vertices",
+        action="store_true",
+        help="path 模式 continuous：顶点对齐分段（顶点=段边界，转角不切角），仅 continuous+spacing",
     )
     args = p.parse_args()
     if args.selftest:
