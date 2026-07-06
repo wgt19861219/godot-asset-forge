@@ -86,3 +86,8 @@ func run(runner) -> void:
 		runner.check(
 			(bad_color as StandardMaterial3D).albedo_color.g > 0.9, "非法 hex albedo.g 回退白 >0.9（A-4）"
 		)
+	# v6 ramp 分流（params 含 start_height/end_height → make_ramp ArrayMesh，否则 PrismMesh）
+	var ramp_handmade = AssetFactory.create_mesh("ramp", {"start_height": 0.5, "end_height": 1.0, "length": 2.0, "width": 1.0})
+	runner.check(ramp_handmade is ArrayMesh, "create_mesh('ramp', {start_height}) → ArrayMesh（make_ramp 手写）")
+	var ramp_default = AssetFactory.create_mesh("ramp", {"length": 2.0, "height": 1.0, "width": 1.0})
+	runner.check(ramp_default is PrismMesh, "create_mesh('ramp', {}) → PrismMesh（现状零回归）")

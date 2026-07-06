@@ -37,7 +37,9 @@ static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 				float(params.get("thickness", 0.1))
 			)
 			return m
-		"ramp":  # 语义化 prism：坡道
+		"ramp":  # 语义化 prism：坡道（v6：params 含 start_height/end_height → 手写 wedge 衔接，否则 PrismMesh 零回归）
+			if params.has("start_height") or params.has("end_height"):
+				return CustomMeshes.make_ramp(params)
 			var m := PrismMesh.new()
 			m.size = Vector3(
 				float(params.get("length", 2.0)),
