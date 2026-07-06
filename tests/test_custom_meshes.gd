@@ -86,6 +86,31 @@ func run(runner) -> void:
 	_check_xs(runner, CustomMeshes._post_xs(3.0, 2, true, true), [-1.5, 1.5], "#7 posts=2 两端柱")
 	_check_xs(runner, CustomMeshes._post_xs(3.0, 2, true, false), [-1.5], "#8 posts=2 去末")
 	_check_xs(runner, CustomMeshes._post_xs(3.0, 0, true, true), [], "#9 posts<1 → 空列表（不崩，信任上层 max(posts,1)）")
+	# v6 make_ramp 手写 wedge（A3 + 斜顶法线 Y>0）
+	var ramps := {
+		"上升默认": CustomMeshes.make_ramp({"length": 2.0, "width": 1.0, "start_height": 0.0, "end_height": 1.0}),
+		"上升自定义": CustomMeshes.make_ramp({"length": 2.0, "width": 1.0, "start_height": 0.2, "end_height": 0.8}),
+		"水平退化": CustomMeshes.make_ramp({"length": 2.0, "width": 1.0, "start_height": 0.0, "end_height": 0.0}),
+		"下降": CustomMeshes.make_ramp({"length": 2.0, "width": 1.0, "start_height": 1.0, "end_height": 0.5}),
+	}
+	for label in ramps:
+		var rm: ArrayMesh = ramps[label]
+		runner.check(rm != null and rm is ArrayMesh, "make_ramp %s 返回 ArrayMesh" % label)
+		runner.check(rm.get_surface_count() == 1, "make_ramp %s 单 surface（A3）" % label)
+		var rvlen: int = rm.surface_get_array_len(0)
+		runner.check(rvlen > 0, "make_ramp %s 顶点数 > 0（实际 %d）" % [label, rvlen])
+		# 斜顶法线断言：所有法线模长≈1（归一化）+ 存在朝上法线 Y>0.5（斜顶/水平顶朝上）
+		var rarrays: Array = rm.surface_get_arrays(0)
+		var rnormals: PackedVector3Array = rarrays[Mesh.ARRAY_NORMAL]
+		var all_unit: bool = true
+		var has_up_facing: bool = false  # 朝上法线（斜顶/水平顶 Y>0.5）
+		for nv in rnormals:
+			if absf(nv.length() - 1.0) > 0.01:
+				all_unit = false
+			if nv.y > 0.5:
+				has_up_facing = true  # 斜顶（上升/下降 Y>0）或水平顶（start==end 时 (0,1,0)）
+		runner.check(all_unit, "make_ramp %s 法线全归一化（模长≈1）" % label)
+		runner.check(has_up_facing, "make_ramp %s 存在朝上法线 Y>0.5（斜顶/水平顶）" % label)
 
 
 # v5 _post_xs 单测辅助：逐元素 is_equal_approx 比较浮点数组（posts=4 含 t=1/3 → -0.5 浮点，不能直接 ==）

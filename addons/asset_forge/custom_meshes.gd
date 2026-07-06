@@ -169,6 +169,38 @@ static func make_fence(params: Dictionary) -> ArrayMesh:
 	return st.commit()
 
 
+# --- ramp 坡道（两端独立高度 wedge → 单 ArrayMesh，A3）---
+# v6 continuous 高度衔接：start_height/end_height ≥ 0（placement 保证），Δh 任意（上升 sh<eh / 下降 sh>eh）
+# 6 面绕序统一 _add_box 约定（几何法线朝楔形内，set_normal 朝外）；斜顶 set_normal (sh-eh, length, 0).normalized() Y 恒朝上
+static func make_ramp(params: Dictionary) -> ArrayMesh:
+	var length: float = float(params.get("length", 2.0))
+	var width: float = float(params.get("width", 1.0))
+	var sh: float = float(params.get("start_height", 0.0))
+	var eh: float = float(params.get("end_height", float(params.get("height", 1.0))))
+	var hl := length / 2.0
+	var hw := width / 2.0
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# 8 顶点
+	var d0 := Vector3(-hl, 0.0, -hw)  # 底面后左
+	var d1 := Vector3(-hl, 0.0, hw)   # 底面前左
+	var d2 := Vector3(hl, 0.0, hw)    # 底面前右
+	var d3 := Vector3(hl, 0.0, -hw)   # 底面后右
+	var t0 := Vector3(-hl, sh, -hw)   # 顶面后左
+	var t1 := Vector3(-hl, sh, hw)    # 顶面前左
+	var t2 := Vector3(hl, eh, hw)     # 顶面前右
+	var t3 := Vector3(hl, eh, -hw)    # 顶面后右
+	# 6 面（_add_box 约定：顶点顺序让几何法线朝楔形内，set_normal 朝外）
+	_add_face(st, d1, d2, d3, d0, Vector3(0.0, -1.0, 0.0))  # 底面（内侧 +Y）
+	_add_face(st, t0, t3, t2, t1, Vector3(sh - eh, length, 0.0).normalized())  # 斜顶（法线 Y 恒 +length 朝上）
+	_add_face(st, d1, t1, t2, d2, Vector3(0.0, 0.0, 1.0))  # 前面 Z+（内侧 -Z）
+	_add_face(st, d0, d3, t3, t0, Vector3(0.0, 0.0, -1.0))  # 后面 Z-（内侧 +Z）
+	_add_face(st, d0, t0, t1, d1, Vector3(-1.0, 0.0, 0.0))  # 左端 X-（内侧 +X）
+	_add_face(st, d2, t2, t3, d3, Vector3(1.0, 0.0, 0.0))  # 右端 X+（内侧 -X）
+	# I-3：每面 set_normal 手设法线，不调 index()/generate_normals()（与 _add_box 一致，避免平滑）
+	return st.commit()
+
+
 # --- 辅助：box（24 独立顶点 + 面法线，I-3：修 stairs/fence box 法线被平滑）---
 # 旧版 8 共享顶点 + index() 按位置去重 → box 角顶点被 3 面共享 → generate_normals() smooth 把法线
 # 平均为对角线方向（多分量），光照在面间圆滑过渡，box 看起来像低面数球。
