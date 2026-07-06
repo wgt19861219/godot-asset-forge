@@ -237,14 +237,14 @@ func _handle_generate_path(
 	var shape: String = String(payload.get("shape", ""))
 	var base_params: Dictionary = payload.get("params", {})
 	# continuous 模式 shape 白名单（length 沿 X）
-	if mode == "continuous" and shape != "wall" and shape != "fence":
+	if mode == "continuous" and shape != "wall" and shape != "fence" and shape != "ramp":
 		_server.send_result(
 			req_id,
 			false,
 			{
 				"error": "unsupported_shape",
 				"message":
-				"continuous 模式仅支持 wall/fence（length 沿 X），当前 " + shape
+				"continuous 模式仅支持 wall/fence/ramp（length 沿 X），当前 " + shape
 			},
 			ws
 		)
@@ -286,11 +286,17 @@ func _handle_generate_path(
 				req_id,
 				ws
 			)
-	else:  # continuous：每段独立 create_mesh（length 注入）
-		for i in samples.size():
+	else:  # continuous：每段独立 create_mesh（length + fence 端柱注入）
+		var seg_count: int = samples.size()
+		for i in seg_count:
 			var seg: Dictionary = samples[i]
 			var seg_params: Dictionary = base_params.duplicate()
 			seg_params["length"] = seg["length"]
+			if shape == "fence":
+				# v5 端柱共享：所有段保首柱（=接缝柱），仅末段保末柱（=终点柱），
+				# 其他段去末柱（避免与下段首柱重叠 z-fighting）。discrete/单件不注入，零回归。
+				seg_params["start_post"] = true
+				seg_params["end_post"] = i == seg_count - 1
 			var seg_mesh := AssetFactory.create_mesh(shape, seg_params)
 			_place_one(
 				root,
@@ -302,7 +308,7 @@ func _handle_generate_path(
 				seg["rotation_deg"],
 				payload,
 				batch_id,
-				samples.size(),  # v3：total
+				seg_count,  # v3：total
 				req_id,
 				ws
 			)
