@@ -27,7 +27,8 @@ static func parse_path(raw: Variant) -> Dictionary:
 # 输入退化校验 → 错误描述字符串（空串 = 合法）
 # mode: "discrete"（v1 默认，零回归）/ "continuous"（v2 段阵列）
 static func validate(
-	points: Array, spacing: float, count: int, align: String, include_endpoints: bool, mode := "discrete"
+	points: Array, spacing: float, count: int, align: String,
+	include_endpoints: bool, mode := "discrete", align_vertices := false
 ) -> String:
 	if mode != "discrete" and mode != "continuous":
 		return "mode 必须 discrete|continuous"
@@ -50,6 +51,12 @@ static func validate(
 	# continuous：align 强制 path（length 沿 chord）
 	if mode == "continuous" and align != "path":
 		return "continuous align 强制 path（length 沿 chord），当前 " + align
+	# v4：va 与不兼容模式冲突 → 报错（追加末尾，让 v2 既有校验先报；
+	# va+count+spacing 被 spacing/count 互斥先拦，va+count 无 spacing 才落到此）
+	if align_vertices and mode == "discrete":
+		return "align_vertices 仅 continuous 模式可用"
+	if align_vertices and mode == "continuous" and has_count:
+		return "align_vertices 仅 spacing 模式可用（count 等分边界不对齐顶点）"
 	return ""
 
 
@@ -57,10 +64,11 @@ static func validate(
 # mode="discrete"（v1）：返回顶点采样点（含 miter 切线）。
 # mode="continuous"：返回段数组 [{position, rotation_deg, length, distance}]（每段沿 chord）。
 static func sample(
-	points: Array, spacing: float, count: int, align: String, include_endpoints: bool, mode := "discrete"
+	points: Array, spacing: float, count: int, align: String,
+	include_endpoints: bool, mode := "discrete", align_vertices := false
 ) -> Array:
 	if mode == "continuous":
-		return _sample_continuous(points, spacing, count, include_endpoints)
+		return _sample_continuous(points, spacing, count, include_endpoints, align_vertices)
 	var last: int = points.size() - 1
 	var seg_len: Array = []
 	var vertex_d: Array = [0.0]  # vertex_d[i] = 顶点 i 的累计弧长
@@ -95,11 +103,11 @@ static func sample(
 # - yaw=atan2(-chord.z, chord.x)（+X 对齐 chord，与 discrete 的切线 miter 不同）
 # - 零长段（length<_EPS）跳过
 static func _sample_continuous(
-	points: Array, spacing: float, count: int, include_endpoints: bool
+	points: Array, spacing: float, count: int, include_endpoints: bool, align_vertices := false
 ) -> Array:
 	var last: int = points.size() - 1
 	var seg_len: Array = []
-	var vertex_d: Array = [0.0]
+	var vertex_d: Array = [0.0]  # v4：va 分支激活此字段（v2 算完未用，死代码转核心）
 	var acc := 0.0
 	for i in last:
 		var l: float = (points[i] as Vector3).distance_to(points[i + 1] as Vector3)
@@ -109,7 +117,24 @@ static func _sample_continuous(
 	var total: float = acc
 	# 段边界
 	var boundaries: Array = []
-	if spacing > 0.0:
+	if align_vertices:
+		# v4：每折线段 [vertex_d[i], vertex_d[i+1]] 独立按 spacing 切 + 段末去重
+		# validate 已保证 mode==continuous 且 spacing>0
+		for i in range(last):
+			var seg_start: float = float(vertex_d[i])
+			var seg_end: float = float(vertex_d[i + 1])
+			if float(seg_len[i]) < _EPS:
+				continue  # 零长折线段跳过（其末顶点=下段起点，不丢）
+			if boundaries.is_empty():
+				boundaries.append(seg_start)  # 首段才补起点（跨段共享顶点）
+			var d := seg_start + spacing
+			while d < seg_end - _EPS:
+				boundaries.append(d)
+				d += spacing
+			# 段末去重（复用 v2 :117 补尾模式，防御浮点近似整除重复边界）
+			if (seg_end - float(boundaries[boundaries.size() - 1])) > _EPS:
+				boundaries.append(seg_end)
+	elif spacing > 0.0:
 		var d := 0.0
 		while d <= total + _EPS:
 			boundaries.append(d)

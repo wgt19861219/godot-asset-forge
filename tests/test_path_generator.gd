@@ -190,3 +190,54 @@ func run(runner) -> void:
 		PathGenerator.validate(line, 1.0, 0, "path", true) == "",
 		"validate 默认 mode=discrete（v1 零回归）"
 	)
+	# === v4 align_vertices（顶点对齐分段，va 仅 continuous+spacing 生效）===
+	# L 形 [(0,0,0),(4,0,0),(4,0,4)]，两段各 4m，vertex_d=[0,4,8]
+	var L4 := [Vector3(0, 0, 0), Vector3(4, 0, 0), Vector3(4, 0, 4)]
+	# #1 va=true spacing=3 → boundaries [0,3,4,7,8] → 4 段（长 3/1/3/1，转角顶点 4=边界）
+	var va1 := PathGenerator.sample(L4, 3.0, 0, "path", true, "continuous", true)
+	runner.check(va1.size() == 4, "va L spacing=3 → 4 段（实际 %d）" % va1.size())
+	runner.check(abs(float(va1[0]["length"]) - 3.0) < 0.001, "va 段 0 长 3")
+	runner.check(abs(float(va1[1]["length"]) - 1.0) < 0.001, "va 段 1 长 1（短尾）")
+	runner.check(abs(float(va1[2]["length"]) - 3.0) < 0.001, "va 段 2 长 3")
+	runner.check(abs(float(va1[3]["length"]) - 1.0) < 0.001, "va 段 3 长 1（短尾）")
+	runner.check(abs(float(va1[2]["distance"]) - 4.0) < 0.001, "va 段 2 d_start=4（转角顶点=边界）")
+	# #2 va=true spacing=2 → [0,2,4,6,8] → 4 段（整除无短尾，段末去重不重复边界）
+	var va2 := PathGenerator.sample(L4, 2.0, 0, "path", true, "continuous", true)
+	runner.check(va2.size() == 4, "va L spacing=2 → 4 段（整除，实际 %d）" % va2.size())
+	runner.check(abs(float(va2[0]["length"]) - 2.0) < 0.001, "va 整除段长 = spacing")
+	runner.check(abs(float(va2[3]["distance"]) - 6.0) < 0.001, "va 整除段 3 d_start=6")
+	# #3 单段 3.1m spacing=3 → [0,3,3.1] → 2 段（3 + 短尾 0.1 保留）
+	var seg31 := [Vector3(0, 0, 0), Vector3(3.1, 0, 0)]
+	var va3 := PathGenerator.sample(seg31, 3.0, 0, "path", true, "continuous", true)
+	runner.check(va3.size() == 2, "va 单段 3.1 spacing=3 → 2 段（短尾，实际 %d）" % va3.size())
+	runner.check(abs(float(va3[1]["length"]) - 0.1) < 0.001, "va 短尾段长 0.1（保留）")
+	# #4 count + va=true → invalid_params
+	runner.check(
+		PathGenerator.validate(L4, 0.0, 3, "path", true, "continuous", true) != "",
+		"validate va + count → invalid（仅 spacing 模式可用）"
+	)
+	# #5 discrete + va=true → invalid_params
+	runner.check(
+		PathGenerator.validate(L4, 1.0, 0, "path", true, "discrete", true) != "",
+		"validate va + discrete → invalid（仅 continuous 模式可用）"
+	)
+	# #6 va=false（默认）→ = v2 continuous（L total=8 spacing=1 → 8 段，零回归）
+	var va6 := PathGenerator.sample(L4, 1.0, 0, "path", true, "continuous", false)
+	runner.check(va6.size() == 8, "va=false = v2（L spacing=1 → 8 段，零回归，实际 %d）" % va6.size())
+	# #7 include_endpoints + va=true → 静默忽略（true/false 同结果）
+	var va7b := PathGenerator.sample(L4, 3.0, 0, "path", false, "continuous", true)
+	runner.check(va7b.size() == va1.size(), "va 静默忽略 include_endpoints（true/false 同段数）")
+	# #8 折线含零长段 [(0,0,0),(2,0,0),(2,0,0),(4,0,0)] spacing=2 → [0,2,4] → 2 段
+	var dup_va := [Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 0), Vector3(4, 0, 0)]
+	var va8 := PathGenerator.sample(dup_va, 2.0, 0, "path", true, "continuous", true)
+	runner.check(va8.size() == 2, "va 跨零长折线段 → 2 段（实际 %d）" % va8.size())
+	runner.check(abs(float(va8[0]["length"]) - 2.0) < 0.001, "va 零长段例段 0 长 2")
+	# #9 单段 0.3m spacing=0.1（浮点近似整除）→ 近似 [0,0.1,0.2,0.3] → 3 段
+	var seg03 := [Vector3(0, 0, 0), Vector3(0.3, 0, 0)]
+	var va9 := PathGenerator.sample(seg03, 0.1, 0, "path", true, "continuous", true)
+	runner.check(va9.size() == 3, "va 浮点近似整除 0.3/0.1 → 3 段（实际 %d）" % va9.size())
+	# #10 va 短路径合法（BATCH_LIMIT 在 plugin 层护，PathGenerator validate 不拦）
+	runner.check(
+		PathGenerator.validate(L4, 3.0, 0, "path", true, "continuous", true) == "",
+		"validate va L spacing=3 合法"
+	)
