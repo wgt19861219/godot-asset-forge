@@ -80,7 +80,7 @@ token 正确 → `{"type":"handshake_ack","payload":{"server":"asset_forge","god
 - **回执 total 字段**：每条 `generate_result` 的 result envelope 含 `total`：int，采样点总数（discrete = 物件数 / continuous = 段数）。客户端可收第一条读 total 收齐（D 方案，path_node + spacing 模式必需）
 - **undo**：所有采样点共享一个 batch_id，一条 `undo_last` 全删
 
-**continuous 模式**：栏板（wall/fence/ramp）沿路径铺满，每段 length = 弦长（自适应间距），朝向 +X 对齐段弦方向。spacing 模式段数 = v1 点数 − 1；count 模式段数 = N（独立等分，不复用 v1 边界）。fence 段接缝端柱由 v5 放置层按段索引注入 `start_post`/`end_post` 去重（所有段保首柱 = 接缝柱，仅末段保末柱 = 终点柱，端柱共享零 z-fighting）；ramp 接缝高度台阶为已知局限（PrismMesh 斜面在 Y 不沿路径，留后续）。
+**continuous 模式**：栏板（wall/fence/ramp）沿路径铺满，每段 length = 弦长（自适应间距），朝向 +X 对齐段弦方向。spacing 模式段数 = v1 点数 − 1；count 模式段数 = N（独立等分，不复用 v1 边界）。fence 段接缝端柱由 v5 放置层按段索引注入 `start_post`/`end_post` 去重（端柱共享零 z-fighting）；ramp 接缝高度由 v6 放置层注入 `start_height`/`end_height` 衔接（`_compute_seg_heights` 按累计弧长比例分配 height 总升高，恒定坡度，折线/直线都成立；支持下降 height 负）。
 
 **align_vertices 模式（v4）**：每个折线段 `[vertex_d[i], vertex_d[i+1]]` 独立按 spacing 切，段末顶点强制为边界（去重防御浮点）。栏板在转角顶点处自然断开，不横跨转角切角。短尾保留（丢短尾=丢顶点对齐）；va 的 while `_EPS` 阈值保证每段长 >_EPS，不产生极短段。
 

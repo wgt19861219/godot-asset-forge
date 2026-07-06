@@ -9,7 +9,7 @@
 | `sphere` | `radius 0.5` / `radial_segments 24` / `rings 16` |
 | `prism` | `size [1,1,1]` / `left_to_right 0.5` |
 | `wall` | `length 2` / `height 1` / `thickness 0.1`（语义化 box） |
-| `ramp` | `length 2` / `height 1` / `width 1`（语义化 prism，坡道，`left_to_right=0`；v5 起支持 continuous 模式，接缝高度台阶为已知局限） |
+| `ramp` | `length 2` / `height 1` / `width 1` / `start_height 0` / `end_height 1`（语义化 prism，坡道，`left_to_right=0`；v6 起 continuous 模式 height 作总升高，各段按累计弧长比例衔接恒定坡度，支持下降 height 负；单件/discrete 用 PrismMesh，continuous 用手写 wedge） |
 
 ## 5 手写 ArrayMesh（`custom_meshes.gd`，SurfaceTool）
 
