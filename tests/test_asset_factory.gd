@@ -91,3 +91,34 @@ func run(runner) -> void:
 	runner.check(ramp_handmade is ArrayMesh, "create_mesh('ramp', {start_height}) → ArrayMesh（make_ramp 手写）")
 	var ramp_default = AssetFactory.create_mesh("ramp", {"length": 2.0, "height": 1.0, "width": 1.0})
 	runner.check(ramp_default is PrismMesh, "create_mesh('ramp', {}) → PrismMesh（现状零回归）")
+	# === v7 mesh 缓存 ===
+	AssetFactory._cache.clear()  # ADVISORY2：测试 setup 隔离，避免跨测试缓存污染
+	# 相同 params 返同一 Mesh（is_same 身份比较）
+	var cp1 := {"length": 3.0, "height": 1.2, "posts": 4}
+	var cf1 := AssetFactory.create_mesh("fence", cp1)
+	var cf2 := AssetFactory.create_mesh("fence", cp1.duplicate())
+	runner.check(is_same(cf1, cf2), "v7 缓存：相同 params 返同一 Mesh（is_same 身份）")
+	# 不同 params 返不同 Mesh
+	var cf3 := AssetFactory.create_mesh("fence", {"length": 4.0, "height": 1.2, "posts": 4})
+	runner.check(not is_same(cf1, cf3), "v7 缓存：不同 params 返不同 Mesh")
+	# 顶层 dict 顺序无关（_params_key 排序 keys）
+	var fp_ord1 := {"length": 3.0, "height": 1.2, "posts": 4}
+	var fp_ord2 := {"posts": 4, "height": 1.2, "length": 3.0}
+	runner.check(
+		is_same(AssetFactory.create_mesh("fence", fp_ord1), AssetFactory.create_mesh("fence", fp_ord2)),
+		"v7 缓存：顶层 dict 顺序无关（_params_key 排序）"
+	)
+	# 嵌套 dict 顺序无关（ADVISORY1：直接测 _params_key 覆盖 _variant_key 嵌套分支，shape params 当前扁平无触发）
+	runner.check(
+		AssetFactory._params_key({"outer": {"a": 1, "b": 2}}) == AssetFactory._params_key({"outer": {"b": 2, "a": 1}}),
+		"v7 _params_key 嵌套 dict 顺序无关（_variant_key 递归排序）"
+	)
+	# null 不缓存（未知 shape）
+	AssetFactory._cache.clear()
+	runner.check(AssetFactory.create_mesh("pyramid", {}) == null, "未知 shape 返 null")
+	runner.check(AssetFactory._cache.size() == 0, "v7 缓存：null 不污染 _cache")
+	# ramp 分流隔离（手写 wedge vs PrismMesh 不同 key 不互染）
+	var cr_hand := AssetFactory.create_mesh("ramp", {"start_height": 0.5, "end_height": 1.0, "length": 2.0, "width": 1.0})
+	var cr_def := AssetFactory.create_mesh("ramp", {"length": 2.0, "height": 1.0, "width": 1.0})
+	runner.check(cr_hand is ArrayMesh and cr_def is PrismMesh, "v7 缓存：ramp 分流隔离（手写 vs PrismMesh）")
+	runner.check(not is_same(cr_hand, cr_def), "v7 缓存：ramp 不同 params 不同 mesh")

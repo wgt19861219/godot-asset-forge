@@ -11,6 +11,7 @@
 - **场景内放置**：parent / transform / name 碰撞自增 `_001`
 - **批量生成** + **undo**（batch 原子一条 undo）+ **save `.tscn` 预制件**（PackedScene，可复用 instance）
 - **本地安全**：bind `127.0.0.1` + handshake token 鉴权
+- **mesh 缓存**：重复 shape / continuous count 模式自动缓存 mesh 资源（相同 params 共享，GPU vertex buffer 复用）
 - **EditorPlugin `@tool`**：编辑器视口实时可见，零文件 IO、零后台线程
 
 ## 架构

@@ -5,7 +5,24 @@ class_name AssetFactory
 extends RefCounted
 
 
+# v7 mesh 缓存（static var 持 Mesh 引用，常驻 plugin session；@tool 热重载偶发清空无害）
+static var _cache: Dictionary = {}
+
+
+# v7 缓存：相同 (shape, params) 返同一 Mesh 资源（MeshInstance3D 共享 → GPU vertex buffer 复用）
+# 未知 shape 返 null 不缓存。material 不进 key（base_params 只含几何参数子字典）
 static func create_mesh(shape: String, params: Dictionary) -> Mesh:
+	var key: String = shape.to_lower() + "|" + _params_key(params)
+	if _cache.has(key):
+		return _cache[key]
+	var mesh: Mesh = _create_mesh_uncached(shape, params)
+	if mesh != null:
+		_cache[key] = mesh  # null（未知 shape）不缓存
+	return mesh
+
+
+# 既有创建逻辑（create_mesh 缓存未命中时调，原 create_mesh body 逐字提取）
+static func _create_mesh_uncached(shape: String, params: Dictionary) -> Mesh:
 	match shape.to_lower():
 		"box":
 			var m := BoxMesh.new()
@@ -61,6 +78,34 @@ static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 		_:
 			LogHelper.error("AssetFactory: 未知 shape '%s'" % shape)
 			return null
+
+
+# v7 缓存 key：顺序无关（Dictionary key 排序）+ 零碰撞（完整内容序列化，非 hash）
+# 不用 Dictionary.hash()（顺序敏感 godot-proposals #9452 + 碰撞静默返错误 mesh）
+static func _params_key(params: Dictionary) -> String:
+	var keys: Array = params.keys()
+	keys.sort()
+	var parts: PackedStringArray = []
+	for k in keys:
+		parts.append(str(k) + ":" + _variant_key(params[k]))
+	return "{" + ",".join(parts) + "}"
+
+
+# v7 _params_key 的 Variant 值序列化（递归 Dictionary 排序 / Array 有序 / PackedFloat64Array / 标量 str）
+static func _variant_key(v: Variant) -> String:
+	if v is Dictionary:
+		return _params_key(v)  # 嵌套 dict 递归 + 排序
+	if v is Array:
+		var parts: PackedStringArray = []
+		for x in (v as Array):
+			parts.append(_variant_key(x))  # 数组有序（正确，数组本有序）
+		return "[" + ",".join(parts) + "]"
+	if v is PackedFloat64Array:  # _vec3 兼容（asset_factory.gd _vec3 接受 Array 或 PackedFloat64Array）
+		var parts: PackedStringArray = []
+		for x in (v as PackedFloat64Array):
+			parts.append(str(x))
+		return "[" + ",".join(parts) + "]"
+	return str(v)
 
 
 static func create_material(spec: Variant) -> Material:
