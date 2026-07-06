@@ -458,6 +458,60 @@ async def run_selftest(args):
     ok = bool(result.get("success")) and freed_n == 4
     all_ok = all_ok and ok
     print(f"{'PASS' if ok else 'FAIL'}  generate_path va undo（freed 4）")
+    # v5 generate_path continuous + fence（L 路径 count=3，端柱共享注入 start_post/end_post）
+    fence_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_v5_fence",
+            "payload": {
+                "shape": "fence",
+                "path": [[0, 0, 0], [3, 0, 0], [3, 0, 3]],
+                "count": 3,
+                "mode": "continuous",
+                "material": "wood",
+                "name": "st_v5_fence",
+            },
+        },
+        3,
+    )
+    ok = len(fence_results) == 3 and all(bool(r.get("success")) for r in fence_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous fence（{len(fence_results)}/3 result）")
+    # undo continuous fence（同 batch_id 原子弹 3 段）
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_v5_fence_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 3
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous fence undo（freed 3）")
+    # v5 generate_path continuous + ramp（直线 count=3，验证白名单放行；接缝高度台阶属已知局限不断言）
+    ramp_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_v5_ramp",
+            "payload": {
+                "shape": "ramp",
+                "path": [[0, 0, 0], [3, 0, 0]],
+                "count": 3,
+                "mode": "continuous",
+                "material": "stone",
+                "name": "st_v5_ramp",
+            },
+        },
+        3,
+    )
+    ok = len(ramp_results) == 3 and all(bool(r.get("success")) for r in ramp_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous ramp（{len(ramp_results)}/3 result）")
+    # undo continuous ramp
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_v5_ramp_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 3
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous ramp undo（freed 3）")
     await ws.close()
     sys.exit(0 if all_ok else 1)
 
