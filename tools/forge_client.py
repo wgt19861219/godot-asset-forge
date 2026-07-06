@@ -430,6 +430,34 @@ async def run_selftest(args):
     ok = bool(result.get("success")) and freed_n == 3
     all_ok = all_ok and ok
     print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous undo（freed 3）")
+    # v4 generate_path continuous + align_vertices（L 路径 spacing=3 → 4 段，顶点对齐）
+    va_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_va",
+            "payload": {
+                "shape": "wall",
+                "path": [[0, 0, 0], [4, 0, 0], [4, 0, 4]],
+                "spacing": 3,
+                "mode": "continuous",
+                "align_vertices": True,
+                "material": "stone",
+                "name": "st_va",
+            },
+        },
+        4,
+    )
+    ok = len(va_results) == 4 and all(bool(r.get("success")) for r in va_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous + align_vertices（{len(va_results)}/4 result）")
+    # undo va（同 batch_id 原子弹 4 段）
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_va_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 4
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path va undo（freed 4）")
     await ws.close()
     sys.exit(0 if all_ok else 1)
 

@@ -62,6 +62,9 @@ python tools/forge_client.py path box --path '[[0,0,0],[10,0,0]]' --count 5 --ma
 python tools/forge_client.py path wall --path '[[0,0,0],[5,0,0],[5,0,5]]' --mode continuous --count 5 --mat stone
 python tools/forge_client.py path fence --path '[[0,0,0],[10,0,0]]' --mode continuous --spacing 2 --mat wood
 
+# 顶点对齐分段（v4）：栏板在折线转角处断开，不切角
+python tools/forge_client.py path fence --path '[[0,0,0],[4,0,0],[4,0,4]]' --spacing 3 --mode continuous --align-vertices --mat wood
+
 # Path3D 节点输入（编辑器画曲线 → bash 引用）
 python tools/forge_client.py path cylinder --path-node /Root/MyPath --count 8 --mat metal
 python tools/forge_client.py path fence --path-node /Root/FencePath --spacing 2 --mode continuous --mat wood
@@ -106,6 +109,8 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 | `--no-endpoints` | 不含端点（默认含） |
 
 **朝向注记**：`align=path` 基于「物件正面 -Z、XZ 地平面、Y up」假设。旋转对称物件（box/cylinder/sphere/prism/cone/tube/torus）无视觉差异；**方向敏感物件**（fence/wall 长度沿 X、stairs 上行沿 +Z）用 `align=path` 朝向会偏 90°——离散摆放适合对称物件，方向敏感件的连续铺设留待 v2。
+
+**顶点对齐分段（v4 `--align-vertices`）**：仅 continuous+spacing 模式生效。开启后折线每个顶点强制为段边界，栏板在转角处自然断开（v2 等间距可能横跨转角切角）。短尾段保留（如 4m 段 spacing=3 → 一块 3m + 一块 1m 短尾）。`--count` 与 `--align-vertices` 互斥报错。
 
 **continuous 模式**：栏板（wall/fence）沿路径首尾相连铺满，length 自适应段长，仅支持 wall/fence（length 沿 X）。fence 段接缝端柱重合会 z-fighting（preview 级，生产用 discrete 或待 v3 去重）。
 

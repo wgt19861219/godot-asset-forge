@@ -198,14 +198,15 @@ func _handle_generate_path(
 	var count: int = int(payload.get("count", 0))
 	var align: String = String(payload.get("align", "path"))
 	var include_endpoints: bool = bool(payload.get("include_endpoints", true))
+	var align_vertices: bool = bool(payload.get("align_vertices", false))  # v4 新增
 	var verr: String = PathGenerator.validate(
-		points, spacing, count, align, include_endpoints, mode
+		points, spacing, count, align, include_endpoints, mode, align_vertices
 	)
 	if verr != "":
 		_server.send_result(req_id, false, {"error": "invalid_params", "message": verr}, ws)
 		return
 	var samples: Array = PathGenerator.sample(
-		points, spacing, count, align, include_endpoints, mode
+		points, spacing, count, align, include_endpoints, mode, align_vertices
 	)
 	# A7：samples 空（continuous 短曲线 0 段 / spacing 过大）→ invalid_params（防 client 卡死）
 	if samples.is_empty():
