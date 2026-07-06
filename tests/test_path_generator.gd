@@ -255,3 +255,36 @@ func run(runner) -> void:
 		PathGenerator.validate(line, 1e-4, 0, "path", true) == "",
 		"validate spacing=_EPS 合法（边界，< 才拦）"
 	)
+	# === v6 _compute_seg_heights（continuous ramp 高度衔接，弧长基础）===
+	# #1 等长 3 段上升（d: 0/3/6/9，rise=3）→ [{0,1},{1,2},{2,3}]
+	var hs1 := PathGenerator._compute_seg_heights(
+		[{"distance": 0.0, "length": 3.0}, {"distance": 3.0, "length": 3.0}, {"distance": 6.0, "length": 3.0}],
+		9.0, 3.0
+	)
+	runner.check(hs1.size() == 3, "_compute_seg_heights #1 等长 3 段 → 3 项")
+	runner.check(abs(float(hs1[0]["start_h"]) - 0.0) < 0.001, "_compute_seg_heights #1 首段 start=0")
+	runner.check(abs(float(hs1[0]["end_h"]) - 1.0) < 0.001, "_compute_seg_heights #1 段0 end=1（rise×d/total）")
+	runner.check(abs(float(hs1[2]["end_h"]) - 3.0) < 0.001, "_compute_seg_heights #1 末段 end=rise=3")
+	runner.check(abs(float(hs1[1]["start_h"]) - float(hs1[0]["end_h"])) < 0.001, "_compute_seg_heights #1 段 i end = 段 i+1 start（衔接）")
+	# #2 折线弦长<弧长（length 1.8/2.7/3.6 < 弧长差 2/3/4，模拟跨顶点；CRITICAL 2）
+	var hs2 := PathGenerator._compute_seg_heights(
+		[{"distance": 0.0, "length": 1.8}, {"distance": 2.0, "length": 2.7}, {"distance": 5.0, "length": 3.6}],
+		9.0, 5.0
+	)
+	runner.check(abs(float(hs2[0]["end_h"]) - (5.0 * 2.0 / 9.0)) < 0.001, "_compute_seg_heights #2 段0 end=5×2/9≈1.111（用 distance 弧长，非 length 弦长得 5×1.8/9=1.0）")
+	runner.check(abs(float(hs2[1]["start_h"]) - float(hs2[0]["end_h"])) < 0.001, "_compute_seg_heights #2 折线衔接（段 i end = 段 i+1 start，弧长）")
+	runner.check(abs(float(hs2[2]["end_h"]) - 5.0) < 0.001, "_compute_seg_heights #2 末段 end=rise=5")
+	# #3 下降（rise<0，等长 3 段）→ [{3,2},{2,1},{1,0}]（递减，正高度，楔形朝上）
+	var hs3 := PathGenerator._compute_seg_heights(
+		[{"distance": 0.0, "length": 3.0}, {"distance": 3.0, "length": 3.0}, {"distance": 6.0, "length": 3.0}],
+		9.0, -3.0
+	)
+	runner.check(abs(float(hs3[0]["start_h"]) - 3.0) < 0.001, "_compute_seg_heights #3 下降首段 start=|rise|=3")
+	runner.check(abs(float(hs3[2]["end_h"]) - 0.0) < 0.001, "_compute_seg_heights #3 下降末段 end=0")
+	runner.check(abs(float(hs3[0]["end_h"]) - 2.0) < 0.001, "_compute_seg_heights #3 下降段0 end=2（递减）")
+	runner.check(float(hs3[0]["start_h"]) > float(hs3[0]["end_h"]), "_compute_seg_heights #3 下降 start>end（Δh<0）")
+	# #4 单段（count=1，total=5，rise=2）→ [{0,2}]
+	var hs4 := PathGenerator._compute_seg_heights([{"distance": 0.0, "length": 5.0}], 5.0, 2.0)
+	runner.check(hs4.size() == 1, "_compute_seg_heights #4 单段 → 1 项")
+	runner.check(abs(float(hs4[0]["start_h"]) - 0.0) < 0.001, "_compute_seg_heights #4 单段 start=0")
+	runner.check(abs(float(hs4[0]["end_h"]) - 2.0) < 0.001, "_compute_seg_heights #4 单段 end=rise=2")

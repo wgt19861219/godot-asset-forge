@@ -199,6 +199,28 @@ static func _total_length(points: Array) -> float:
 	return total
 
 
+# v6 continuous ramp 高度分配：rise 按累计弧长比例分到各段端点（恒定坡度）
+# 段 i 的 d_end = 段 i+1 的 d_start（弧长衔接，boundaries 连续）；末段 d_end = total_len
+# 注意：seg["length"] 是弦长（p_start.distance_to(p_end)），跨折线顶点时 < 弧长，不能用（CRITICAL 2）
+# rise 符号：≥0 上升（0→rise 递增）；<0 下降（|rise|→0 递减，正高度，楔形朝上）
+static func _compute_seg_heights(samples: Array, total_len: float, rise: float) -> Array:
+	assert(samples.size() > 0, "_compute_seg_heights: samples 空")
+	assert(total_len > 0.0, "_compute_seg_heights: total_len 非正")
+	var abs_rise: float = absf(rise)
+	var heights: Array = []
+	var n: int = samples.size()
+	for i in n:
+		var d_start: float = float(samples[i]["distance"])
+		var d_end: float = float(samples[i + 1]["distance"]) if i + 1 < n else total_len
+		if rise >= 0.0:
+			# 上升：0 → rise（递增）
+			heights.append({"start_h": abs_rise * d_start / total_len, "end_h": abs_rise * d_end / total_len})
+		else:
+			# 下降：abs_rise → 0（递减，正高度）
+			heights.append({"start_h": abs_rise * (total_len - d_start) / total_len, "end_h": abs_rise * (total_len - d_end) / total_len})
+	return heights
+
+
 static func _distances(
 	total: float, spacing: float, count: int, include_endpoints: bool
 ) -> Array:
