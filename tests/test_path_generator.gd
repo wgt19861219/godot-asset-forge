@@ -241,3 +241,17 @@ func run(runner) -> void:
 		PathGenerator.validate(L4, 3.0, 0, "path", true, "continuous", true) == "",
 		"validate va L spacing=3 合法"
 	)
+	# === v4 健壮性：spacing 过小（< _EPS）→ invalid（堵 v2 起漏的 while 循环爆）===
+	runner.check(
+		PathGenerator.validate(line, 1e-5, 0, "path", true) != "",
+		"validate spacing<_EPS → invalid（堵 discrete _distances 循环爆）"
+	)
+	runner.check(
+		PathGenerator.validate(line, 1e-5, 0, "path", true, "continuous") != "",
+		"validate continuous spacing<_EPS → invalid（堵 _sample_continuous 循环爆）"
+	)
+	# spacing=_EPS 边界合法（< 才拦；=_EPS 切 4/1e-4=4 万段会被 plugin BATCH_LIMIT 另护）
+	runner.check(
+		PathGenerator.validate(line, 1e-4, 0, "path", true) == "",
+		"validate spacing=_EPS 合法（边界，< 才拦）"
+	)

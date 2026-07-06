@@ -41,6 +41,9 @@ static func validate(
 		return "path 所有点重合（总长为 0）"
 	var has_spacing: bool = spacing > 0.0
 	var has_count: bool = count >= 1
+	# v4 健壮性：spacing 过小（>0 但 <_EPS）→ invalid（堵 _distances/_sample_continuous while 循环爆）
+	if has_spacing and spacing < _EPS:
+		return "spacing 过小（< %s，会切极多段导致循环爆），最小 %s" % [str(_EPS), str(_EPS)]
 	if has_spacing and has_count:
 		return "spacing 与 count 只能二选一"
 	if not has_spacing and not has_count:
