@@ -76,7 +76,7 @@ static func validate(
 ```gdscript
 if align_vertices and mode == "discrete":
     return "align_vertices 仅 continuous 模式可用"
-if align_vertices and mode == "continuous" and count >= 1:
+if align_vertices and mode == "continuous" and has_count:  # has_count = count>=1（v2 validate :42）
     return "align_vertices 仅 spacing 模式可用（count 等分边界不对齐顶点）"
 # include_endpoints + va：静默忽略（冗余非冲突，文档注明，不报错）
 ```
@@ -106,12 +106,30 @@ elif count >= 1:
 # 段生成（:127-147）零改动，直接吃新 boundaries
 ```
 
+**va 数据流**（L 形 [(0,0,0),(4,0,0),(4,0,4)] spacing=3，对比 v2 等间距）：
+
+```
+vertex_d=[0,4,8]   seg_len=[4,4]
+    │  每折线段 [vertex_d[i], vertex_d[i+1]] 独立按 spacing 切 + 段末去重
+    ▼
+段0 [0,4]: 首段补起点 0; d=3(<4-ε→入); d=6(>4→停); 段末去重 (4-3)>ε → +4
+段1 [4,8]: 非首段不补起点; d=7(<8-ε→入); d=10(>8→停); 段末去重 (8-7)>ε → +8
+    │
+    ▼
+boundaries = [0,3,4,7,8]  ──段生成 :127-147（零改动）──▶  4 段
+   (0,3)长3 │ (3,4)长1[短尾] │ (4,7)长3 │ (7,8)长1[短尾]
+   ↑ 转角顶点 4 = 段边界，栏板在此断开（不切角）
+
+对比 v2 等间距 spacing=3：boundaries=[0,3,6,8]
+   段 (3,6) 横跨转角顶点 4 → chord=(1,0,2) 长√5≈2.24 → 栏板切角（栏板直、路径拐弯）
+```
+
 **关键设计点**：
 1. **顶点=边界**：va 模式下每个折线顶点（`vertex_d[i]`）强制为段边界。两顶点之间独立按 spacing 切，整除余数留短尾段（如 4m 段 spacing=3 → 边界 0,3,4 → 段 [0,3] 长 3 + 段 [3,4] 长 1 短尾）。
 2. **vertex_d 激活**：v2 `_sample_continuous` 算了 vertex_d（:102-108）但未用（死代码，v2 review 记）。va 分支用它做折线段区间 `[vertex_d[i], vertex_d[i+1]]`——死代码转为核心。
 3. **段末去重**：`while d < seg_end - _EPS` 已使 while 内 d 严格 < seg_end，但浮点累加在极端 spacing（如 0.1 反复加）下边界微妙；段末 append 前复用 v2 :117 `(seg_end - last) > _EPS` 守卫，防御性 + 与 v2 风格统一。
 4. **跨段共享顶点**：`if boundaries.is_empty()` 守卫确保只在首段补 `seg_start`，后续段不重复补（前段末 `append(seg_end)` 已是本段 `seg_start`）。中间零长折线段跳过后，下段 `is_empty()` 仍能正确补起点。
-5. **短尾保留**：va 语义必然（丢短尾 = 丢顶点对齐）。短尾段经段生成 :134 `if length < _EPS: continue` 过滤——极短尾（< 0.1mm）会被跳过（该顶点对齐了 boundary 但无 mesh，工程可忽略，文档注记）。
+5. **短尾保留**：va 语义必然（丢短尾 = 丢顶点对齐）。while 条件 `d < seg_end - _EPS` 保证段末最后一段长 >_EPS（最后一段 = seg_end - last_d，而 last_d < seg_end - _EPS）——**va 不产生 <_EPS 极短段**，段生成 :134 零长过滤对 va 无作用（该过滤针对 v2 等间距浮点退化）。
 6. **discrete 零改动**：sample 的 discrete 分支不传 align_vertices；discrete 现有 miter 切线 / `_distances` 等点采样逻辑全保留。
 
 ## §2 协议 / 错误处理 / 测试
@@ -191,11 +209,11 @@ def predict_n(points, spacing, count, include_endpoints, mode, align_vertices=Fa
 | 5 | discrete + va=true | validate 返「仅 continuous 模式可用」|
 | 6 | va=false（默认）| = v2 等间距（现有 test_path_generator.gd continuous 用例覆盖，零回归）|
 | 7 | include_endpoints=true + va=true | 静默忽略，boundaries = va 不带 endpoints |
-| 8 | 中间零长折线段（共线三点中点重合）+ va | 该顶点不丢（下段 `is_empty()` 补起点），段数正确 |
-| 9 | seg_len 整除 spacing（4m/2）+ va | 段末去重生效，无 length≈0 段（最后 boundary=4 不重复）|
+| 8 | 折线 [(0,0,0),(2,0,0),(2,0,0),(4,0,0)]（中间两点重合 → 第二段零长）+ spacing=2 va=true | seg_len=[2,0,2] vertex_d=[0,2,2,4]；零长段 `continue` 跳过、下段 `is_empty()` 为 false（前段末已 append 2）不补起点；boundaries=[0,2,4] → **2 段**（长 2/2，零长折线段不丢顶点也不增段）|
+| 9 | 单段 seg_len=0.3（浮点）/ spacing=0.1 va=true（浮点近似整除压力） | 浮点 0.1 累加 d=0.1,0.2,0.30000000000000004；`while d<0.3-_EPS` 使 0.30000000000000004 不入循环；段末去重 (0.3-0.2)>_EPS → append(0.3)；boundaries 近似 [0,0.1,0.2,0.3] → **3 段**（无重复边界、无 length≈0 段）|
 | 10 | va + spacing 段数 > BATCH_LIMIT | invalid_params（A7/BATCH_LIMIT 不变量）|
 
-**注记**（次要，spec 提一句不专门测）：va 下极短尾（< _EPS=0.1mm）经段生成 :134 `if length < _EPS: continue` 跳过 → 该顶点对齐了 boundary 但无 mesh 段。工程可忽略（<0.1mm 栏板段本就无意义）；用户用 spacing 接近折线段整数倍可避免短尾。
+**注记**：va 的 while 条件 `d < seg_end - _EPS` 保证每段长 >_EPS（内部段长 = spacing，末段长 = seg_end - last_d > _EPS），故 va 不产生 <_EPS 极短段，段生成 :134 零长过滤对 va 无作用（针对 v2 等间距浮点退化）。退化输入 spacing<_EPS 会切极多 <_EPS 段全被 :134 跳过 → samples 空 → A7 守卫拦截（与 v2/v3 一致）。
 
 #1-3 验 va 切分算法 + 短尾，#4-5 验不兼容报错，#6 零回归，#7 验 include_endpoints 静默忽略，#8-9 验边缘（零长段 / 整除去重），#10 验不变量。
 
@@ -203,6 +221,7 @@ def predict_n(points, spacing, count, include_endpoints, mode, align_vertices=Fa
 
 - `predict_n` va=true L 形 spacing=3 → 4（与 server #1 一致）
 - `predict_n` va=true 整除（spacing=2）→ 4
+- `predict_n` va=true 折线含零长段 [(0,0,0),(2,0,0),(2,0,0),(4,0,0)] spacing=2 → 2（零长段贡献 0，与 server #8 一致）
 - `predict_n` va=false → 走 legacy（v1/v2 用例覆盖，零回归）
 
 ## 实施顺序提示（详细计划由 writing-plans 出）
