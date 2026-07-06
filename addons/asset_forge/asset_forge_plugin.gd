@@ -286,8 +286,14 @@ func _handle_generate_path(
 				req_id,
 				ws
 			)
-	else:  # continuous：每段独立 create_mesh（length + fence 端柱注入）
+	else:  # continuous：每段独立 create_mesh（length + fence 端柱 / ramp 高度注入）
 		var seg_count: int = samples.size()
+		# v6：ramp 高度衔接，循环外算一次（仅 ramp 用，弧长基础非弦长）
+		var ramp_heights: Array = []
+		if shape == "ramp":
+			var rise: float = float(base_params.get("height", 1.0))
+			var total_len: float = PathGenerator._total_length(points)
+			ramp_heights = PathGenerator._compute_seg_heights(samples, total_len, rise)
 		for i in seg_count:
 			var seg: Dictionary = samples[i]
 			var seg_params: Dictionary = base_params.duplicate()
@@ -297,6 +303,10 @@ func _handle_generate_path(
 				# 其他段去末柱（避免与下段首柱重叠 z-fighting）。discrete/单件不注入，零回归。
 				seg_params["start_post"] = true
 				seg_params["end_post"] = i == seg_count - 1
+			elif shape == "ramp":
+				# v6 高度衔接（_compute_seg_heights 循环外预算，弧长比例，恒定坡度）
+				seg_params["start_height"] = float(ramp_heights[i]["start_h"])
+				seg_params["end_height"] = float(ramp_heights[i]["end_h"])
 			var seg_mesh := AssetFactory.create_mesh(shape, seg_params)
 			_place_one(
 				root,

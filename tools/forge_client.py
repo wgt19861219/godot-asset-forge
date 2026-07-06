@@ -512,6 +512,34 @@ async def run_selftest(args):
     ok = bool(result.get("success")) and freed_n == 3
     all_ok = all_ok and ok
     print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous ramp undo（freed 3）")
+    # v6 generate_path continuous + ramp（L 路径 count=3，高度衔接，验证折线弧长分配）
+    ramp_v6_results = await send_and_recv_batch(
+        ws,
+        {
+            "type": "generate_path",
+            "id": "st_v6_ramp",
+            "payload": {
+                "shape": "ramp",
+                "path": [[0, 0, 0], [3, 0, 0], [3, 0, 3]],
+                "count": 3,
+                "mode": "continuous",
+                "height": 2,
+                "material": "stone",
+                "name": "st_v6_ramp",
+            },
+        },
+        3,
+    )
+    ok = len(ramp_v6_results) == 3 and all(bool(r.get("success")) for r in ramp_v6_results)
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous ramp v6（{len(ramp_v6_results)}/3 result，L 路径高度衔接）")
+    # undo continuous ramp v6
+    result = await send_and_recv(ws, {"type": "undo_last", "id": "st_v6_ramp_undo"})
+    msg = str(result.get("message", ""))
+    freed_n = int(msg.split()[-1]) if msg.startswith("freed ") and msg.split()[-1].isdigit() else -1
+    ok = bool(result.get("success")) and freed_n == 3
+    all_ok = all_ok and ok
+    print(f"{'PASS' if ok else 'FAIL'}  generate_path continuous ramp v6 undo（freed 3）")
     await ws.close()
     sys.exit(0 if all_ok else 1)
 
