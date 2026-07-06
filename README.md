@@ -90,7 +90,7 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 | `tube` | 手写 | `height 1` / `radius 0.5` / `thickness 0.1` |
 | `torus` | 手写 | `major_radius 0.5` / `minor_radius 0.2` |
 | `stairs` | 手写 组合 | `steps 5` / `step_height 0.2` / `step_depth 0.3` / `width 1.2` |
-| `fence` | 手写 组合 | `length 3` / `height 1.2` / `posts 4` / `post_radius 0.05` / `rail_thickness 0.04` |
+| `fence` | 手写 组合 | `length 3` / `height 1.2` / `posts 4` / `post_radius 0.05` / `rail_thickness 0.04` / `start_post true` / `end_post true` |
 
 详见 [docs/shapes-reference.md](docs/shapes-reference.md)。
 
@@ -112,7 +112,7 @@ python tools/forge_client.py box --mat '{"color":"FF0000","metallic":0.5,"roughn
 
 **顶点对齐分段（v4 `--align-vertices`）**：仅 continuous+spacing 模式生效。开启后折线每个顶点强制为段边界，栏板在转角处自然断开（v2 等间距可能横跨转角切角）。短尾段保留（如 4m 段 spacing=3 → 一块 3m + 一块 1m 短尾）。`--count` 与 `--align-vertices` 互斥报错。
 
-**continuous 模式**：栏板（wall/fence）沿路径首尾相连铺满，length 自适应段长，仅支持 wall/fence（length 沿 X）。fence 段接缝端柱重合会 z-fighting（preview 级，生产用 discrete 或待 v3 去重）。
+**continuous 模式**：栏板（wall/fence/ramp）沿路径首尾相连铺满，length 自适应段长，仅支持 wall/fence/ramp（length 沿 X）。fence 段接缝端柱由 v5 去重（放置层注入 start_post/end_post，端柱共享：所有段保首柱 + 仅末段保末柱）。ramp 接缝高度台阶为已知局限（留后续）。
 
 **Path3D 节点输入（v3）**：`--path-node` 引用场景里的 Path3D 节点（curve 已平滑，baked_points 即密集折线，无需自实现 Catmull-Rom）。节点必须在当前活动场景；建议 parent 留空（非 root parent 会坐标错位）。超长曲线 baked_points 密度无上限（BATCH_LIMIT 只护物件数不护输入点数），极长路径建议先简化曲线。
 

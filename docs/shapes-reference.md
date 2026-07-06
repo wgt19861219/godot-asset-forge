@@ -9,7 +9,7 @@
 | `sphere` | `radius 0.5` / `radial_segments 24` / `rings 16` |
 | `prism` | `size [1,1,1]` / `left_to_right 0.5` |
 | `wall` | `length 2` / `height 1` / `thickness 0.1`（语义化 box） |
-| `ramp` | `length 2` / `height 1` / `width 1`（语义化 prism，坡道，`left_to_right=0`） |
+| `ramp` | `length 2` / `height 1` / `width 1`（语义化 prism，坡道，`left_to_right=0`；v5 起支持 continuous 模式，接缝高度台阶为已知局限） |
 
 ## 5 手写 ArrayMesh（`custom_meshes.gd`，SurfaceTool）
 
@@ -19,7 +19,7 @@
 | `tube` | `height 1` / `radius 0.5` / `thickness 0.1` / `segments 24`（空心圆柱） |
 | `torus` | `major_radius 0.5` / `minor_radius 0.2` / `major_segments 32` / `minor_segments 16` |
 | `stairs` | `steps 5` / `step_height 0.2` / `step_depth 0.3` / `width 1.2`（多台阶） |
-| `fence` | `length 3` / `height 1.2` / `posts 4` / `post_radius 0.05` / `rail_thickness 0.04`（柱+横档） |
+| `fence` | `length 3` / `height 1.2` / `posts 4` / `post_radius 0.05` / `rail_thickness 0.04` / `start_post true` / `end_post true`（柱+横档；continuous 模式放置层自动注入 start/end_post 端柱共享，单件/discrete 默认 true） |
 
 `stairs` / `fence` 把多部件烘焙进**单个 ArrayMesh**（一个 surface），避免多 mesh 取首偏置问题。
 
