@@ -134,6 +134,33 @@ async def send_and_recv_batch(ws, msg, n=None):
     return results
 
 
+# === v8 daemon：按 type 收齐 + 逐 type 镜像 shaping（daemon 与直连共用，DRY）===
+
+
+# 按 type 收齐 server result：generate/undo 返 [单条]，batch 按 n，path 按 total
+async def _collect(ws, msg):
+    await ws.send(json.dumps(msg, ensure_ascii=False))
+    t = msg.get("type")
+    if t == "generate" or t == "undo_last":
+        return [await send_and_recv(ws, msg)]  # 单条（既有 send_and_recv）
+    # batch/path：send_and_recv_batch
+    n = len(msg.get("items", [])) if t == "generate_batch" else None  # path n=None 靠 total
+    return await send_and_recv_batch(ws, msg, n)
+
+
+# 逐 type 镜像 CLI 输出形状（守不变量 #1：generate/undo 单条、batch 无 count、path 有 count）
+def _shape(msg, results):
+    t = msg.get("type")
+    success = all(bool(r.get("success")) for r in results)
+    if t == "generate" or t == "undo_last":
+        return results[0]  # 单条原始 result，无 results/count 包装
+    if t == "generate_batch":
+        return {"success": success, "results": results}  # 无 count（对齐 run_batch :238-239）
+    if t == "generate_path":
+        return {"success": success, "results": results, "count": len(results)}  # 有 count（对齐 run_path :361）
+    return {"success": False, "error": "unknown_type"}
+
+
 async def connect_and_handshake(args):
     ws = await websockets.connect(WS_URL)
     token = read_token(args)
