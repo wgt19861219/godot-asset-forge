@@ -141,7 +141,7 @@ JSON over WebSocket（端口 60650，bind 127.0.0.1）。消息类型：`handsha
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-4 个 suite：AssetFactory / CustomMeshes / ScenePlacer / CommandServer（后者用 WebSocketPeer 自连本地 server 直测协议层）。
+5 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer（后者用 WebSocketPeer 自连本地 server 直测协议层）。
 
 ## 项目结构
 
@@ -156,7 +156,7 @@ addons/asset_forge/   # 插件（10 文件，扁平结构）
   forge_dock.gd            # Dock UI
   log_helper.gd / localization.gd / plugin.cfg
 tools/forge_client.py  # bash 客户端（generate / undo / batch / --selftest）
-tests/                  # 4 suite + test_runner.gd
+tests/                  # 5 suite + test_runner.gd
 docs/                   # 架构 / shape / 协议 文档
 ```
 

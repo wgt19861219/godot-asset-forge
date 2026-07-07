@@ -249,7 +249,13 @@ func _handle_generate_path(
 			ws
 		)
 		return
-	var probe_mesh = AssetFactory.create_mesh(shape, base_params)
+	# v11.5：continuous 段是一次性几何，probe + 段循环走 uncached 不污染 _cache（防长路径无界膨胀）；
+	# discrete 共享 probe_mesh 故仍走缓存 create_mesh（跨命令复用 base mesh）
+	var probe_mesh = (
+		AssetFactory.create_mesh_uncached(shape, base_params)
+		if mode == "continuous"
+		else AssetFactory.create_mesh(shape, base_params)
+	)
 	if probe_mesh == null:
 		_server.send_result(
 			req_id,
@@ -307,7 +313,7 @@ func _handle_generate_path(
 				# v6 高度衔接（_compute_seg_heights 循环外预算，弧长比例，恒定坡度）
 				seg_params["start_height"] = float(ramp_heights[i]["start_h"])
 				seg_params["end_height"] = float(ramp_heights[i]["end_h"])
-			var seg_mesh := AssetFactory.create_mesh(shape, seg_params)
+			var seg_mesh := AssetFactory.create_mesh_uncached(shape, seg_params)  # v11.5：段 mesh 不进 _cache（一次性几何）
 			_place_one(
 				root,
 				seg_mesh,

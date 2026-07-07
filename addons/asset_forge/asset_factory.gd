@@ -15,14 +15,15 @@ static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 	var key: String = shape.to_lower() + "|" + _params_key(params)
 	if _cache.has(key):
 		return _cache[key]
-	var mesh: Mesh = _create_mesh_uncached(shape, params)
+	var mesh: Mesh = create_mesh_uncached(shape, params)
 	if mesh != null:
 		_cache[key] = mesh  # null（未知 shape）不缓存
 	return mesh
 
 
-# 既有创建逻辑（create_mesh 缓存未命中时调，原 create_mesh body 逐字提取）
-static func _create_mesh_uncached(shape: String, params: Dictionary) -> Mesh:
+# 既有创建逻辑（create_mesh 缓存未命中时调；v11.5 提为 public 供 continuous 段循环调用，
+# 段 mesh 不进 _cache 防长路径无界膨胀——continuous 段是一次性几何，无需跨命令复用）
+static func create_mesh_uncached(shape: String, params: Dictionary) -> Mesh:
 	match shape.to_lower():
 		"box":
 			var m := BoxMesh.new()

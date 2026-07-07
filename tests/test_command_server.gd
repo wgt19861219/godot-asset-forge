@@ -149,6 +149,19 @@ func run(runner) -> void:
 		bad_item != null and String(bad_item.get("error")) == "invalid_params",
 		"batch item 非 Dictionary → invalid_params（A-2）"
 	)
+	# === v11.5 P1：generate / generate_path payload 非 dict → invalid_params（与 I-1/A-2 一致）===
+	ws2.send_text(JSON.stringify({"type": "generate", "id": "gpd1", "payload": "not_dict"}))
+	var bad_gen: Variant = _drain_until(ws2, server, "error_invalid", 30)
+	runner.check(
+		bad_gen != null and String(bad_gen.get("error")) == "invalid_params",
+		"generate payload 非 dict → invalid_params（v11.5）"
+	)
+	ws2.send_text(JSON.stringify({"type": "generate_path", "id": "gpd2", "payload": ["not_dict"]}))
+	var bad_path: Variant = _drain_until(ws2, server, "error_invalid", 30)
+	runner.check(
+		bad_path != null and String(bad_path.get("error")) == "invalid_params",
+		"generate_path payload 非 dict → invalid_params（v11.5）"
+	)
 	# === I-2：多 client 不互泄 result（send_result 定向发送，不再 send_to_all 广播）===
 	var ws3 := WebSocketPeer.new()
 	ws3.connect_to_url(url)

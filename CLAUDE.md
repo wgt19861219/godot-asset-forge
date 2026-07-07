@@ -9,7 +9,7 @@ Asset Forge —— Godot 4.6（Forward+）EditorPlugin：bash 一行命令经 We
 ## 常用命令
 
 ```bash
-# 跑全部测试（4 suite，headless，无需打开编辑器）
+# 跑全部测试（5 suite，headless，无需打开编辑器）
 godot --headless --path . --script res://tests/test_runner.gd
 
 # 11 种 shape + undo 的活体自检（需先在 Godot 编辑器启用插件、打开一个场景）
@@ -19,7 +19,7 @@ python tools/forge_client.py --selftest
 pip install websockets
 ```
 
-跑单个 suite：`tests/test_runner.gd::_initialize` 硬编码注册全部 4 个 suite，**没有** CLI 过滤参数。要隔离某 suite，临时注释 `_initialize` 里其它三行 `_run_suite(...)`。单个 `runner.check` 失败不会中断 suite（跑完再汇总），有失败则进程 exit code = 1。
+跑单个 suite：`tests/test_runner.gd::_process` 硬编码注册全部 5 个 suite，**没有** CLI 过滤参数。要隔离某 suite，临时注释 `_process` 里其它四行 `_run_suite(...)`。单个 `runner.check` 失败不会中断 suite（跑完再汇总），有失败则进程 exit code = 1。
 
 ## 架构（跨文件大图）
 

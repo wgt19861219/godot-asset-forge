@@ -207,7 +207,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				send_unauthorized_and_close(ws)
 				return
 			_batch_counter += 1
-			var payload: Dictionary = obj.get("payload", {})
+			# v11.5 P1：payload 非 dict 守卫（与 I-1 顶层 / A-2 batch 一致），防强转 SCRIPT ERROR 中断 _handle_text
+			var payload_v: Variant = obj.get("payload", {})
+			if not (payload_v is Dictionary):
+				send_result(req_id, false, {"error": "invalid_params", "message": "generate payload 必须是对象"}, ws)
+				return
+			var payload: Dictionary = payload_v
 			payload["__req_id"] = req_id
 			command_received.emit(payload, _batch_counter, ws)
 		MSG_GENERATE_BATCH:
@@ -254,7 +259,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				send_unauthorized_and_close(ws)
 				return
 			_batch_counter += 1  # 一次 path 请求 = 一个 batch_id
-			var gp: Dictionary = obj.get("payload", {})
+			# v11.5 P1：payload 非 dict 守卫（与 I-1/A-2 一致），防强转 SCRIPT ERROR 中断 _handle_text
+			var gp_v: Variant = obj.get("payload", {})
+			if not (gp_v is Dictionary):
+				send_result(req_id, false, {"error": "invalid_params", "message": "generate_path payload 必须是对象"}, ws)
+				return
+			var gp: Dictionary = gp_v
 			gp["__req_id"] = req_id
 			command_received.emit(gp, _batch_counter, ws)
 		MSG_UNDO_LAST:
@@ -278,6 +288,10 @@ func _write_token() -> bool:
 	if f:
 		f.store_string(_token)
 		f.close()
+		# v11.5 P1 安全：限制 token 仅本用户可读（防本机其他用户进程读 token 越权操控编辑器）。
+		# Linux/macOS 生效；Windows 返 ERR_UNAVAILABLE 无害（ACL 默认单用户隔离）。失败不阻断（token 已写）。
+		# 0o600（仅 owner 读写）= 384；GDScript 无八进制字面量，故用十进制等值。
+		FileAccess.set_unix_permissions(TOKEN_FILE, 384)
 		return true
 	log_emitted.emit("token 写入失败: " + TOKEN_FILE)
 	return false

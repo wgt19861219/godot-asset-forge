@@ -1,7 +1,7 @@
 # test_runner.gd
 # Asset Forge 独立项目 minimal 测试运行器（headless）。
 # 用法：godot --headless --path <项目根> --script res://tests/test_runner.gd
-# 注册 4 个 suite：AssetFactory / CustomMeshes / ScenePlacer / CommandServer。
+# 注册 5 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer。
 extends SceneTree
 
 var _passed: int = 0

@@ -122,3 +122,13 @@ func run(runner) -> void:
 	var cr_def := AssetFactory.create_mesh("ramp", {"length": 2.0, "height": 1.0, "width": 1.0})
 	runner.check(cr_hand is ArrayMesh and cr_def is PrismMesh, "v7 缓存：ramp 分流隔离（手写 vs PrismMesh）")
 	runner.check(not is_same(cr_hand, cr_def), "v7 缓存：ramp 不同 params 不同 mesh")
+	# === v11.5 P1 修复：create_mesh_uncached 不污染 _cache（continuous 段一次性几何，防长路径膨胀）===
+	AssetFactory._cache.clear()
+	var u1 := AssetFactory.create_mesh_uncached("fence", {"length": 3.0, "height": 1.2})
+	var u2 := AssetFactory.create_mesh_uncached("fence", {"length": 5.0, "height": 2.0})
+	runner.check(u1 != null and u2 != null, "create_mesh_uncached 返回有效 mesh")
+	runner.check(not is_same(u1, u2), "create_mesh_uncached 不同 params 返不同 mesh（每次新建，不缓存）")
+	runner.check(AssetFactory._cache.size() == 0, "create_mesh_uncached 不写 _cache（continuous 段不膨胀）")
+	# 对照：create_mesh 仍缓存（v7 行为零回归）
+	var _cb := AssetFactory.create_mesh("box", {"size": [1.0, 1.0, 1.0]})
+	runner.check(AssetFactory._cache.size() == 1, "对照 create_mesh 仍写 _cache（v7 缓存未破坏）")
