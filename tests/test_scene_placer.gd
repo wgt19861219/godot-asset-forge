@@ -84,6 +84,23 @@ func run(runner) -> void:
 		)
 		runner.check_approx(pf64.position.y, 2.5, 0.001, "pf64 position.y = 2.5（A-1）")
 		runner.check_approx(pf64.position.z, 3.5, 0.001, "pf64 position.z = 3.5（A-1）")
+	# === P2#5：undo_last freed 计数剔除已失效节点（手动释放中间节点，undo 不虚高）===
+	var stack_p25: Array = []
+	ScenePlacer.place(root, mesh, null, {"name": "p25_a"}, stack_p25, 40)
+	ScenePlacer.place(root, mesh, null, {"name": "p25_b"}, stack_p25, 40)
+	ScenePlacer.place(root, mesh, null, {"name": "p25_c"}, stack_p25, 40)
+	# 手动释放中间节点 b（模拟用户在编辑器删了生成节点；栈条目仍在，is_instance_valid 已为 false）
+	var node_b: Node = root.get_node_or_null(NodePath("p25_b"))
+	if node_b != null:
+		root.remove_child(node_b)
+		node_b.free()
+	var ur_p25 := ScenePlacer.undo_last(stack_p25)
+	runner.check(bool(ur_p25["success"]), "P2#5 undo success（栈非空）")
+	runner.check(
+		int(ur_p25["freed"]) == 2,
+		"P2#5 freed=2（3 条入栈但 b 已失效，只计 2 个真实释放，不虚报）"
+	)
+	runner.check(stack_p25.is_empty(), "P2#5 undo 后栈清空（3 条全弹，含失效条目）")
 	# === ScenePlacer.resolve_path3d（v3 path_node）===
 	# 构造 root + Path3D + Curve3D（注：本 suite 已有变量 r3 = place 返回值，此处用 path_root 避免冲突）
 	var path_root := Node3D.new()

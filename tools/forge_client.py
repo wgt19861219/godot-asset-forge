@@ -188,8 +188,14 @@ async def serve(args):
                 return
             # 串行：lock 保证一次只处理一个 CLI 请求（固定 id 并发会撞）
             async with lock:
-                results = await _collect(ws_server, msg)
-                resp = _shape(msg, results)
+                try:
+                    results = await _collect(ws_server, msg)
+                    resp = _shape(msg, results)
+                except SystemExit:
+                    # P1#4：_collect→send_and_recv 超时 sys.exit(5) 会逃逸杀 handler Task（SystemExit 不被
+                    # 外层 OSError/TimeoutError 捕获）→ client reader.read 卡 30s 才回退直连。捕获返 timeout
+                    # 错误，client 立即收失败（daemon 不死，单请求超时不连累后续）
+                    resp = {"success": False, "error": "timeout", "message": "daemon 转发 server 超时"}
             writer.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
             await writer.drain()
         except (OSError, json.JSONDecodeError, asyncio.TimeoutError):

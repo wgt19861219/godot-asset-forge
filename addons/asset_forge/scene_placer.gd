@@ -54,11 +54,12 @@ static func undo_last(undo_stack: Array) -> Dictionary:
 		var top: Dictionary = undo_stack[undo_stack.size() - 1]
 		if int(top["batch_id"]) != batch_id:
 			break
-		var node: Node = top["node"]
+		# P2#5：Variant 接收——节点可能已被用户 free，强类型 Node 赋值 freed instance 会 SCRIPT ERROR
+		var node: Variant = top["node"]
 		if is_instance_valid(node):
-			node.queue_free()
+			(node as Node).queue_free()
+			freed += 1  # 只在真释放时计数（节点已失效不计数，回执 freed 忠实反映场景变化）
 		undo_stack.pop_back()
-		freed += 1
 	# 注：不删 top["saved_path"]——.tscn 是用户可复用资产，undo 只撤场景节点
 	return {"success": true, "freed": freed, "error": ""}
 

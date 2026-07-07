@@ -100,11 +100,17 @@ func poll() -> void:
 		ws.poll()
 		var state := ws.get_ready_state()
 		if state == WebSocketPeer.STATE_OPEN:
-			while ws.get_available_packet_count() > 0:
-				var pkt := ws.get_packet()
-				if ws.was_string_packet():
-					_handle_text(ws, c, pkt.get_string_from_utf8())
-			c["last_seen"] = Time.get_ticks_msec()  # A-9：收包刷新 keepalive（含 handshake/ping/generate）
+			# P2#6：上一轮 send_unauthorized_and_close 标记的 pending_close——此时上一轮入队的
+			# unauthorized 已通过本轮 ws.poll() 发出，现在安全 close（不丢数据帧）；否则正常处理消息
+			if c.get("pending_close", false):
+				ws.close()
+				c["pending_close"] = false
+			else:
+				while ws.get_available_packet_count() > 0:
+					var pkt := ws.get_packet()
+					if ws.was_string_packet():
+						_handle_text(ws, c, pkt.get_string_from_utf8())
+				c["last_seen"] = Time.get_ticks_msec()  # A-9：收包刷新 keepalive（含 handshake/ping/generate）
 		elif state == WebSocketPeer.STATE_CLOSED:
 			# A-3：仅当没有其他 authed client 时才 emit false（多 client 任一断开不应让仍连着的 client 被显示为未连接）
 			if c.get("authed", false) and _authed_count() <= 1:
@@ -146,18 +152,22 @@ func send_result(id: String, success: bool, fields: Dictionary, ws: WebSocketPee
 	send_json(ws, msg)
 
 
-func send_unauthorized_and_close(ws: WebSocketPeer) -> void:
+# P2#6：透传 req_id + 延迟 close 到下一轮 poll，确保 unauthorized 到达 client。
+# 根因：send_json 只入 outbound 队列，同帧 ws.close() 让 peer 转 CLOSING，未发送的 unauthorized
+# 数据帧在下一轮 poll 被丢弃 → client 只收到断连、收不到 unauthorized，卡 30s（id 是否匹配都一样）。
+# 方案：标记 pending_close，下一轮 server.poll 的 ws.poll() 把 unauthorized 发出后再 close
+func send_unauthorized_and_close(ws: WebSocketPeer, client: Dictionary, req_id: String = "") -> void:
 	send_json(
 		ws,
 		{
 			"type": MSG_GENERATE_RESULT,
-			"id": "",
+			"id": req_id,
 			"success": false,
 			"error": "unauthorized",
 			"message": "token 不符"
 		}
 	)
-	ws.close()
+	client["pending_close"] = true
 
 
 # --- 消息处理 ---
@@ -188,10 +198,22 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 	var req_id := String(obj.get("id", ""))
 	match t:
 		MSG_HANDSHAKE:
-			var payload: Dictionary = obj.get("payload", {})
+			# v11.5 P1 补漏（handshake）：payload 非 dict 守卫——handshake 前即可达，强转 Dictionary
+			# 触发 SCRIPT ERROR 中断 _handle_text（generate/generate_path 已守，补齐 I-1 三处覆盖）
+			var hs_v: Variant = obj.get("payload", {})
+			if not (hs_v is Dictionary):
+				send_json(
+					ws,
+					{
+						"type": MSG_GENERATE_RESULT, "id": req_id, "success": false,
+						"error": "invalid_params", "message": "handshake payload 必须是对象"
+					}
+				)
+				return
+			var payload: Dictionary = hs_v
 			if String(payload.get("token", "")) != _token:
 				log_emitted.emit("handshake token 不符，拒绝")
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			client["authed"] = true
 			log_emitted.emit("Client 已鉴权: " + String(client["id"]))
@@ -199,12 +221,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			send_json(ws, _handshake_ack())
 		MSG_PING:
 			if not client.get("authed", false):
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			send_json(ws, {"type": MSG_PONG})
 		MSG_GENERATE:
 			if not client.get("authed", false):
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			_batch_counter += 1
 			# v11.5 P1：payload 非 dict 守卫（与 I-1 顶层 / A-2 batch 一致），防强转 SCRIPT ERROR 中断 _handle_text
@@ -217,7 +239,7 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			command_received.emit(payload, _batch_counter, ws)
 		MSG_GENERATE_BATCH:
 			if not client.get("authed", false):
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			# A-2：items 非 Array / item 非 Dictionary 时回 invalid_params，不静默退化为空 batch
 			var items: Variant = obj.get("items", [])
@@ -230,6 +252,24 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				)
 				return
 			var arr: Array = items
+			# P1#2：空 items 数组静默无响应 → client send_and_recv_batch total=0 死等到 30s 超时。
+			# 显式 invalid_params，守"每个无效输入都有对应回执"的输入守卫完备性
+			if arr.is_empty():
+				send_result(
+					req_id, false, {"error": "invalid_params", "message": "generate_batch items 不能为空"}, ws
+				)
+				return
+			# P2#7：item 类型校验提到 _batch_counter 自增前——任一畸形立即 invalid_params return，
+			# 保证 batch 零落地（不出现"前几个已 emit 进 undo_stack，第 N 个才报错"的部分成功）
+			for it_pre in arr:
+				if not (it_pre is Dictionary):
+					send_result(
+						req_id,
+						false,
+						{"error": "invalid_params", "message": "generate_batch item 必须是对象"},
+						ws
+					)
+					return
 			if arr.size() > BATCH_LIMIT:
 				send_result(
 					req_id,
@@ -243,20 +283,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				return
 			_batch_counter += 1
 			for it in arr:
-				if not (it is Dictionary):
-					send_result(
-						req_id,
-						false,
-						{"error": "invalid_params", "message": "generate_batch item 必须是对象"},
-						ws
-					)
-					return
 				var p: Dictionary = it
 				p["__req_id"] = req_id
 				command_received.emit(p, _batch_counter, ws)
 		MSG_GENERATE_PATH:
 			if not client.get("authed", false):
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			_batch_counter += 1  # 一次 path 请求 = 一个 batch_id
 			# v11.5 P1：payload 非 dict 守卫（与 I-1/A-2 一致），防强转 SCRIPT ERROR 中断 _handle_text
@@ -269,7 +301,7 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			command_received.emit(gp, _batch_counter, ws)
 		MSG_UNDO_LAST:
 			if not client.get("authed", false):
-				send_unauthorized_and_close(ws)
+				send_unauthorized_and_close(ws, client, req_id)
 				return
 			command_received.emit({"__undo": true, "__req_id": req_id}, -1, ws)
 		_:

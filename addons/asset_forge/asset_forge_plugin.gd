@@ -72,12 +72,11 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 	# undo（batch_id == -1）
 	if bool(payload.get("__undo", false)):
 		var ur := ScenePlacer.undo_last(_undo_stack)
-		_server.send_result(
-			req_id,
-			bool(ur["success"]),
-			{"message": "freed %d" % int(ur["freed"]), "error": String(ur["error"])},
-			ws
-		)
+		var ur_ok := bool(ur["success"])
+		var undo_fields := {"error": String(ur["error"])}
+		if ur_ok:
+			undo_fields["message"] = "freed %d" % int(ur["freed"])  # P2#8：仅成功时塞 freed 文案（nothing_to_undo 不报 freed 0）
+		_server.send_result(req_id, ur_ok, undo_fields, ws)
 		return
 	# generate_path（路径阵列）—— v3：path 或 path_node 都触发 path 分支（v2 仅 path）
 	if payload.has("path") or payload.has("path_node"):
@@ -204,6 +203,27 @@ func _handle_generate_path(
 	)
 	if verr != "":
 		_server.send_result(req_id, false, {"error": "invalid_params", "message": verr}, ws)
+		return
+	# P1#3：sample 前预检采样数上限——防 spacing 过小（>validate 的 _EPS 但仍极小）/ count 过大，
+	# 导致 sample 内部 while/for 全量生成海量点后才被 BATCH_LIMIT 拒（单帧 OOM/卡帧，违反"全同步单帧"安全前提）。
+	# 预估为粗略上界（spacing 模式 total/spacing，count 模式 count）；放行则 sample 仍受下方 BATCH_LIMIT 二次拦截
+	var pre_total := PathGenerator._total_length(points)
+	var pre_est: int = 0
+	if spacing > 0.0:
+		pre_est = int(pre_total / spacing) + 2  # +2 端点余量（discrete 上界；continuous 段数更少，安全）
+	elif count >= 1:
+		pre_est = count + 1
+	if pre_est > _Server.BATCH_LIMIT:
+		_server.send_result(
+			req_id,
+			false,
+			{
+				"error": "invalid_params",
+				"message": "采样点预估 %d 超过上限 %d（缩短路径/增大 spacing/减少 count）"
+				% [pre_est, _Server.BATCH_LIMIT]
+			},
+			ws
+		)
 		return
 	var samples: Array = PathGenerator.sample(
 		points, spacing, count, align, include_endpoints, mode, align_vertices

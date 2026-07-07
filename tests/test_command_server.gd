@@ -162,6 +162,41 @@ func run(runner) -> void:
 		bad_path != null and String(bad_path.get("error")) == "invalid_params",
 		"generate_path payload 非 dict → invalid_params（v11.5）"
 	)
+	# === P1#1：handshake payload 非 dict → invalid_params（补齐 I-1 三处，handshake 前可达）===
+	ws2.send_text(JSON.stringify({"type": "handshake", "id": "hsp", "payload": "not_dict"}))
+	var bad_hs: Variant = _drain_until(ws2, server, "error_invalid", 30)
+	runner.check(
+		bad_hs != null and String(bad_hs.get("error")) == "invalid_params",
+		"handshake payload 非 dict → invalid_params（P1#1，不 SCRIPT ERROR）"
+	)
+	if bad_hs != null:
+		runner.check(String(bad_hs.get("id")) == "hsp", "handshake invalid_params 透传 id（P1#1）")
+	# === P1#2：generate_batch 空 items → 立即 invalid_params（不静默无响应卡 client 30s）===
+	ws2.send_text(JSON.stringify({"type": "generate_batch", "id": "empty_b", "items": []}))
+	var empty_b: Variant = _drain_until(ws2, server, "error_invalid", 30)
+	runner.check(
+		empty_b != null and String(empty_b.get("error")) == "invalid_params",
+		"generate_batch items=[] → 立即 invalid_params（P1#2，不静默挂死）"
+	)
+	# === P2#7：generate_batch 含非 dict item → invalid_params + 零落地（item 校验前置，不部分成功）===
+	var emit_count: Array = [0]
+	var on_p27 := func(_p, _b, _ws): emit_count[0] = int(emit_count[0]) + 1
+	server.command_received.connect(on_p27)
+	ws2.send_text(
+		JSON.stringify(
+			{"type": "generate_batch", "id": "mixed", "items": [{"shape": "box"}, "bad_item", {"shape": "cone"}]}
+		)
+	)
+	var mixed_err: Variant = _drain_until(ws2, server, "error_invalid", 30)
+	runner.check(
+		mixed_err != null and String(mixed_err.get("error")) == "invalid_params",
+		"generate_batch 含非 dict item → invalid_params（P2#7，item 校验前置）"
+	)
+	runner.check(
+		int(emit_count[0]) == 0,
+		"P2#7：畸形 batch 零落地（command_received 0 次 emit，不部分成功）"
+	)
+	server.command_received.disconnect(on_p27)
 	# === I-2：多 client 不互泄 result（send_result 定向发送，不再 send_to_all 广播）===
 	var ws3 := WebSocketPeer.new()
 	ws3.connect_to_url(url)
@@ -237,6 +272,47 @@ func run(runner) -> void:
 	)
 	for c in fill_clients:
 		c.close()
+	# 清 A-9 残留席位：fill_clients.close() 后 server 需 poll 接收 close frame 才 erase，
+	# 显式等待 _clients 降回 < MAX_CLIENTS，确保 ws_unauth 能连（不被 MAX_CLIENTS 超额拒）
+	for i in 60:
+		server.poll()
+		if server._clients.size() < AssetForgeServer.MAX_CLIENTS:
+			break
+		OS.delay_msec(20)
+	# === P2#6：未鉴权 generate → unauthorized 透传 req_id（不再 id="" 卡 30s）===
+	var ws_unauth := WebSocketPeer.new()
+	ws_unauth.connect_to_url(url)
+	_poll_until_open(ws_unauth, server)
+	runner.check(
+		ws_unauth.get_ready_state() == WebSocketPeer.STATE_OPEN,
+		"P2#6 ws_unauth 连上 OPEN（server _clients=%d）" % server._clients.size()
+	)
+	ws_unauth.send_text(
+		JSON.stringify({"type": "generate", "id": "unauth_id", "payload": {"shape": "box"}})
+	)
+	var unauth_resp: Variant = _drain_until(ws_unauth, server, "error_invalid", 30)
+	runner.check(
+		unauth_resp != null and String(unauth_resp.get("error")) == "unauthorized",
+		"未鉴权 generate → unauthorized 到达 client（P2#6，close 前 poll 发出不卡 30s）"
+	)
+	if unauth_resp != null:
+		runner.check(
+			String(unauth_resp.get("id")) == "unauth_id",
+			"unauthorized 透传 req_id（P2#6，client 按 id 匹配）"
+		)
+	if unauth_resp != null:
+		runner.check(
+			String(unauth_resp.get("id")) == "unauth_id",
+			"unauthorized 透传 req_id（P2#6，client 按 id 匹配，不卡 30s）"
+		)
+	# 确保 ws_unauth 关闭释放席位（不干扰后续测试）
+	ws_unauth.close()
+	for i in 15:
+		ws_unauth.poll()
+		server.poll()
+		if ws_unauth.get_ready_state() == WebSocketPeer.STATE_CLOSED:
+			break
+		OS.delay_msec(20)
 	# === generate_path：emit command_received 共享同一 batch_id（与 generate 同语义）===
 	recv.clear()
 	ws2.send_text(
