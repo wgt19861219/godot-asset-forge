@@ -471,3 +471,19 @@ def test_run_repl_server_timeout_sysexit_swallowed(capsys, monkeypatch):
     asyncio.new_event_loop().run_until_complete(run())
     err = capsys.readouterr().err
     assert "超时" in err or "错误" in err  # 提示跳过
+
+
+# === v9 Task 3：--repl argparse + main 分流 + 互斥 ===
+def test_build_parser_has_repl_flag():
+    """_build_parser 含 --repl 选项。"""
+    args = _build_parser().parse_args(["--repl"])
+    assert args.repl is True
+
+
+def test_repl_mutually_exclusive_with_shape():
+    """--repl 与 shape 位置参数互斥（main 校验 → exit 2 + 互斥消息）。"""
+    import subprocess, sys
+    r = subprocess.run([sys.executable, "-u", "tools/forge_client.py", "--repl", "box"],
+        capture_output=True, text=True, cwd="D:/GitHub/godot-asset-forge")
+    assert r.returncode == 2
+    assert "互斥" in r.stderr

@@ -821,6 +821,7 @@ def _build_parser():
     )
     p.add_argument("--serve", action="store_true", help="启动 daemon 常驻模式（后台保 WS，CLI 复用）")
     p.add_argument("--stop", action="store_true", help="停止 daemon")
+    p.add_argument("--repl", action="store_true", help="进 REPL 交互模式（一个进程循环命令，省启动）")
     return p
 
 
@@ -831,6 +832,13 @@ def main():
         asyncio.run(serve(args)); return
     if args.stop:
         asyncio.run(run_stop(args)); return
+    # v9 REPL（与 shape/位置参数互斥，独立模式，与 serve/stop 并列）
+    if args.repl:
+        if args.shape or args.batch_shapes:
+            print("--repl 与 shape/位置参数互斥（REPL 内敲命令，不预先传 shape）", file=sys.stderr)
+            sys.exit(2)
+        asyncio.run(run_repl(args))
+        return
     if args.selftest:
         asyncio.run(run_selftest(args)); return
     if args.shape == "undo":
