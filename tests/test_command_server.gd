@@ -4,6 +4,17 @@ extends RefCounted
 
 
 func run(runner) -> void:
+	# P1-4 实测：AssetForgeServer.new() 不监听端口（listen 在 start()，非构造）
+	# 驳斥 P1-4「_enter_tree 中 _Server.new() 占端口」前提：new() 后未 listen，端口未占
+	var p14_srv := AssetForgeServer.new()
+	runner.check(
+		not p14_srv.is_running,
+		"P1-4：_Server.new() 后未监听（_running=false，listen 在 start）"
+	)
+	runner.check(
+		p14_srv._tcp == null,
+		"P1-4：_Server.new() 后 _tcp=null（未创建 TCPServer，listen 在 start）"
+	)
 	var server := AssetForgeServer.new()
 	var token_path := server.start()
 	runner.check(token_path != "", "start() 返回 token 路径非空（IMPORTANT-3）")
