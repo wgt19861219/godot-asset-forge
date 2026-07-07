@@ -113,7 +113,7 @@ def test_shape_unknown_type():
 
 
 # === v8 Task 2：daemon serve + _handle_cli 集成测（mock connect_and_handshake + 真 socket 连 daemon）===
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 from forge_client import serve, DAEMON_PORT, DAEMON_IDLE_TIMEOUT
 
 
@@ -199,3 +199,79 @@ def test_serve_stop_message_exits():
             await asyncio.wait_for(task, timeout=2.0)
             assert task.done(), "daemon 应收到 stop 后退出"
     asyncio.new_event_loop().run_until_complete(run())
+
+
+# === v8 Task 3：dispatch（daemon 在转发 / 不在直连回退 + 启 daemon）+ stdio 三件套 ===
+from forge_client import dispatch, _try_daemon, maybe_start_daemon, run_stop
+
+
+def test_try_daemon_returns_none_when_not_running():
+    """daemon 没起 → _try_daemon 返 None（触发回退）。"""
+    msg = {"type": "generate", "id": "req_1", "payload": {"shape": "box"}}
+    result = asyncio.new_event_loop().run_until_complete(_try_daemon(msg))
+    assert result is None
+
+
+def test_try_daemon_forwards_when_running():
+    """daemon 在 → _try_daemon 连上转发返逐 type 镜像。"""
+    async def run():
+        # 启个假 daemon（echo 单条 generate result）
+        async def fake_handle(reader, writer):
+            data = await reader.read(65536)
+            msg = json.loads(data.decode("utf-8"))
+            if msg.get("type") == "generate":
+                resp = {"success": True, "node_path": "/Root/box_0"}  # 单条镜像
+                writer.write(json.dumps(resp).encode("utf-8"))
+                await writer.drain()
+        srv = await asyncio.start_server(fake_handle, "127.0.0.1", DAEMON_PORT)
+        async with srv:
+            result = await _try_daemon({"type": "generate", "id": "req_1", "payload": {"shape": "box"}})
+            assert result == {"success": True, "node_path": "/Root/box_0"}
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_dispatch_falls_back_to_direct_when_no_daemon():
+    """daemon 不在 → dispatch 直连 server（mock connect_and_handshake + _collect）。
+    _shape 对 generate 透传单条原始 result（守不变量 #1）。"""
+    async def run():
+        # FakeWS 响应即期望输出（_shape 透传 results[0]，type/id 也透传）
+        expected = {"success": True, "node_path": "/Root/box_1"}
+        fake_ws = FakeWS([{"type": "generate_result", "id": "req_1", **expected}])
+        started = []
+        async def fake_handshake(args):
+            return fake_ws
+        def fake_start(args):
+            started.append(args)  # 记录是否触发启 daemon
+        msg = {"type": "generate", "id": "req_1", "payload": {"shape": "box"}}
+        with patch("forge_client.connect_and_handshake", new=fake_handshake), \
+             patch("forge_client.maybe_start_daemon", new=fake_start):
+            result = await dispatch(msg, _make_args())
+        # _shape 透传单条原始 result（含 type/id）
+        assert result["success"] is True
+        assert result["node_path"] == "/Root/box_1"
+        assert len(started) == 1  # 回退时触发了启 daemon
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_maybe_start_daemon_uses_stdio_trio(monkeypatch, tmp_path):
+    """maybe_start_daemon：日志文件 truncate-on-start + CREATE_NO_WINDOW + stdin=DEVNULL。"""
+    import subprocess, sys
+    captured = {}
+    log_file = tmp_path / "forge_client_daemon.log"
+    monkeypatch.setattr("tempfile.gettempdir", lambda: str(tmp_path))
+    class FakePopen:
+        def __init__(self, cmd, **kwargs):
+            captured["cmd"] = cmd
+            captured["kwargs"] = kwargs
+    monkeypatch.setattr("subprocess.Popen", FakePopen)
+    maybe_start_daemon(_make_args())
+    # stdin=DEVNULL
+    assert captured["kwargs"]["stdin"] == subprocess.DEVNULL
+    # stdout 是文件对象（日志，非 DEVNULL/PIPE）
+    assert captured["kwargs"]["stdout"] is not subprocess.DEVNULL
+    assert captured["kwargs"]["stderr"] == subprocess.STDOUT
+    # Windows CREATE_NO_WINDOW
+    if sys.platform == "win32":
+        assert captured["kwargs"].get("creationflags") == subprocess.CREATE_NO_WINDOW
+    # 命令是 python -m forge_client --serve（或 __file__ --serve）
+    assert "--serve" in captured["cmd"]

@@ -208,6 +208,71 @@ async def serve(args):
         await ws_server.close()
 
 
+# === v8 CLI 端：daemon 转发 + 直连回退 + 启 daemon ===
+
+
+# 连 daemon 转发，超时/失败返 None（触发直连回退）
+async def _try_daemon(msg):
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(DAEMON_HOST, DAEMON_PORT),
+            timeout=DAEMON_CONNECT_TIMEOUT)
+    except (OSError, asyncio.TimeoutError):
+        return None  # daemon 没起 / 端口占 → 回退
+    try:
+        writer.write(json.dumps(msg, ensure_ascii=False).encode("utf-8"))
+        await writer.drain()
+        data = await asyncio.wait_for(reader.read(65536), timeout=30.0)
+        return json.loads(data.decode("utf-8"))
+    except (OSError, asyncio.TimeoutError, json.JSONDecodeError):
+        return None  # daemon 异常 → 回退
+    finally:
+        writer.close()
+
+
+# 后台 Popen 启 daemon（Windows stdio 三件套，防闪窗 + 日志 + 防阻塞）
+def maybe_start_daemon(args):
+    import subprocess
+    import tempfile
+    log_path = os.path.join(tempfile.gettempdir(), "forge_client_daemon.log")
+    log_f = open(log_path, "w")  # truncate-on-start（非 DEVNULL，崩了能看 traceback）
+    kwargs = {"stdin": subprocess.DEVNULL, "stdout": log_f, "stderr": subprocess.STDOUT}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # 防控制台闪窗
+    subprocess.Popen([sys.executable, __file__, "--serve"], **kwargs)  # 不等
+
+
+# CLI 入口分流：daemon 在转发 / 不在直连 + 启 daemon（返逐 type 镜像 result）
+async def dispatch(msg, args):
+    resp = await _try_daemon(msg)
+    if resp is not None:
+        return resp  # daemon 返的逐 type 镜像
+    # 回退直连（= 当前行为）+ 后台启 daemon（后续命令命中）
+    maybe_start_daemon(args)
+    ws = await connect_and_handshake(args)
+    try:
+        results = await _collect(ws, msg)
+    finally:
+        await ws.close()
+    return _shape(msg, results)
+
+
+# --stop：发 stop 消息给 daemon
+async def run_stop(args):
+    msg = {"type": "stop"}
+    try:
+        reader, writer = await asyncio.open_connection(DAEMON_HOST, DAEMON_PORT)
+        writer.write(json.dumps(msg).encode("utf-8"))
+        await writer.drain()
+        await reader.read(65536)  # daemon 回 {success:true,stopped:true} 后退
+        writer.close()
+        print(json.dumps({"success": True, "stopped": True}, ensure_ascii=False))
+        sys.exit(0)
+    except OSError:
+        print(json.dumps({"success": False, "error": "daemon_not_running"}), file=sys.stderr)
+        sys.exit(1)
+
+
 async def connect_and_handshake(args):
     ws = await websockets.connect(WS_URL)
     token = read_token(args)
@@ -267,18 +332,16 @@ def build_payload(args):
 
 
 async def run_generate(args):
-    ws = await connect_and_handshake(args)
-    result = await send_and_recv(ws, {"type": "generate", "id": "req_1", "payload": build_payload(args)})
+    msg = {"type": "generate", "id": "req_1", "payload": build_payload(args)}
+    result = await dispatch(msg, args)  # daemon 在转发 / 不在直连
     print(json.dumps(result, ensure_ascii=False))
-    await ws.close()
-    sys.exit(0 if result.get("success") else 1)
+    sys.exit(0 if result.get("success") else 1)  # $? 由 CLI 据 success 算（守不变量 #1）
 
 
 async def run_undo(args):
-    ws = await connect_and_handshake(args)
-    result = await send_and_recv(ws, {"type": "undo_last", "id": "undo_1"})
+    msg = {"type": "undo_last", "id": "undo_1"}
+    result = await dispatch(msg, args)
     print(json.dumps(result, ensure_ascii=False))
-    await ws.close()
     sys.exit(0 if result.get("success") else 1)
 
 
@@ -305,15 +368,10 @@ async def run_batch(args):
         print("batch 需要 --items '<json>' 或位置参数 shape 名", file=sys.stderr)
         sys.exit(2)
 
-    n = len(items)
-    ws = await connect_and_handshake(args)
-    results = await send_and_recv_batch(ws, {"type": "generate_batch", "id": "r_batch", "items": items}, n)
-    all_ok = all(bool(r.get("success")) for r in results)
-    # 聚合输出（client 侧聚合，server 不返单条聚合体，2026-07-04 Q7 宽松化）
-    aggregated = {"success": all_ok, "results": results}
-    print(json.dumps(aggregated, ensure_ascii=False))
-    await ws.close()
-    sys.exit(0 if all_ok else 1)
+    msg = {"type": "generate_batch", "id": "r_batch", "items": items}
+    result = await dispatch(msg, args)  # {success, results}（无 count，_shape 保证）
+    print(json.dumps(result, ensure_ascii=False))
+    sys.exit(0 if result.get("success") else 1)
 
 
 def _parse_path_arg(args):
@@ -425,17 +483,10 @@ async def run_path(args):
             )
             sys.exit(2)
 
-    ws = await connect_and_handshake(args)
-    payload = build_path_payload(args, path)
-    # D 方案：n=None，靠 server result 的 total 字段收齐
-    results = await send_and_recv_batch(
-        ws, {"type": "generate_path", "id": "r_path", "payload": payload}, n=None
-    )
-    all_ok = all(bool(r.get("success")) for r in results)
-    aggregated = {"success": all_ok, "results": results, "count": len(results)}
-    print(json.dumps(aggregated, ensure_ascii=False))
-    await ws.close()
-    sys.exit(0 if all_ok else 1)
+    msg = {"type": "generate_path", "id": "r_path", "payload": build_path_payload(args, path)}
+    result = await dispatch(msg, args)  # {success, results, count}（_shape 保证，dispatch 内 close）
+    print(json.dumps(result, ensure_ascii=False))
+    sys.exit(0 if result.get("success") else 1)
 
 
 async def run_selftest(args):
@@ -660,7 +711,13 @@ def main():
         action="store_true",
         help="path 模式 continuous：顶点对齐分段（顶点=段边界，转角不切角），仅 continuous+spacing",
     )
+    p.add_argument("--serve", action="store_true", help="启动 daemon 常驻模式（后台保 WS，CLI 复用）")
+    p.add_argument("--stop", action="store_true", help="停止 daemon")
     args = p.parse_args()
+    if args.serve:
+        asyncio.run(serve(args)); return
+    if args.stop:
+        asyncio.run(run_stop(args)); return
     if args.selftest:
         asyncio.run(run_selftest(args)); return
     if args.shape == "undo":
