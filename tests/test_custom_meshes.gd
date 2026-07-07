@@ -175,6 +175,21 @@ func run(runner) -> void:
 		tube_bot_face and tube_side_face,
 		"tube 底外环边缘硬边（底环 -Y + 外侧面径向共存，未被平滑，P1-7）"
 	)
+	# P1-8 实测：ramp 斜顶 winding 与 box 顶面一致 → cull 可见性一致（同 _add_face 模式）
+	# 几何法线 = cross(v1-v0, v2-v0)（winding 决定 cull 朝向，与 set_normal 独立）；取 3 顶点法线 Y>0.5 的面
+	# 两者几何法线 Y 同号 → winding 一致 → box 经验正常显示则 ramp 斜顶亦正常（P1-8 非剔除 bug）
+	var p18_box := CustomMeshes.make_stairs({"steps": 1, "step_height": 0.2, "step_depth": 0.3, "width": 1.2})
+	var p18_ramp := CustomMeshes.make_ramp({"length": 2.0, "width": 1.0, "start_height": 0.0, "end_height": 1.0})
+	var box_top_gy := _top_face_geom_normal_y(p18_box)
+	var ramp_top_gy := _top_face_geom_normal_y(p18_ramp)
+	runner.check(
+		box_top_gy != 0.0 and ramp_top_gy != 0.0,
+		"P1-8：box 顶面/ramp 斜顶三角形可定位（几何法线 Y=%.3f/%.3f）" % [box_top_gy, ramp_top_gy]
+	)
+	runner.check(
+		signf(box_top_gy) == signf(ramp_top_gy),
+		"P1-8：ramp 斜顶与 box 顶面几何法线 Y 同号（winding 一致 → 可见性一致，非剔除 bug）"
+	)
 
 
 # v5 _post_xs 单测辅助：逐元素 is_equal_approx 比较浮点数组（posts=4 含 t=1/3 → -0.5 浮点，不能直接 ==）
@@ -186,3 +201,26 @@ func _check_xs(runner, actual: Array, expected: Array, label: String) -> void:
 				ok = false
 				break
 	runner.check(ok, "_post_xs %s：期望 %s，实际 %s" % [label, str(expected), str(actual)])
+
+
+# P1-8 辅助：取 mesh 中「3 顶点法线 Y>0.5」的三角形（box 顶面 / ramp 斜顶）的几何法线 Y 分量
+# 几何法线 = cross(v1-v0, v2-v0).normalized()（winding 决定 cull 朝向，与 set_normal 独立）
+func _top_face_geom_normal_y(mesh: ArrayMesh) -> float:
+	var arrays: Array = mesh.surface_get_arrays(0)
+	var verts: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var norms: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	# commit() 可能自动索引化也可能展开，两种都支持
+	if arrays.size() > Mesh.ARRAY_INDEX and arrays[Mesh.ARRAY_INDEX] is PackedInt32Array:
+		var idx: PackedInt32Array = arrays[Mesh.ARRAY_INDEX]
+		for i in range(0, idx.size() - 2, 3):
+			var i0 := int(idx[i])
+			var i1 := int(idx[i + 1])
+			var i2 := int(idx[i + 2])
+			if norms[i0].y > 0.5 and norms[i1].y > 0.5 and norms[i2].y > 0.5:
+				return (verts[i1] - verts[i0]).cross(verts[i2] - verts[i0]).normalized().y
+		return 0.0
+	# 无索引：每 3 顶点一组（SurfaceTool 展开输出）
+	for i in range(0, verts.size() - 2, 3):
+		if norms[i].y > 0.5 and norms[i + 1].y > 0.5 and norms[i + 2].y > 0.5:
+			return (verts[i + 1] - verts[i]).cross(verts[i + 2] - verts[i]).normalized().y
+	return 0.0
