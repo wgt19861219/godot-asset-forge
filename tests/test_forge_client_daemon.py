@@ -403,6 +403,13 @@ def test_parse_repl_line_path():
     assert msg["payload"]["count"] == 5
 
 
+def test_parse_repl_line_path_mutual_exclusion(capsys):
+    """I-1：--path / --path-file / --path-node 三互斥 → None（已提示，不退）。"""
+    msg = _parse_repl_line("path fence --path '[[0,0,0],[3,0,0]]' --path-node /Root/MyPath")
+    assert msg is None
+    assert "三互斥" in capsys.readouterr().err
+
+
 def test_parse_repl_line_mat_invalid_json_returns_none(capsys):
     """--mat 畸形 JSON → None（已提示，不抛、不退）。"""
     msg = _parse_repl_line("box --mat '{bad json'")
@@ -425,7 +432,7 @@ def test_run_repl_loop_multiple_commands_then_exit(capsys, monkeypatch):
     async def fake_handshake(args):
         return fake_ws
     inputs = iter(["box --pos 0 0 0", "undo", "exit"])
-    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, "exit"))
     async def run():
         with patch("forge_client.connect_and_handshake", new=fake_handshake):
             await run_repl(_make_args())
@@ -443,7 +450,7 @@ def test_run_repl_command_error_continues(capsys, monkeypatch):
     async def run():
         with patch("forge_client.connect_and_handshake", new=fake_handshake):
             inputs = iter(["box --mat '{bad'", "exit"])
-            monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+            monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, "exit"))
             await run_repl(_make_args())
     asyncio.new_event_loop().run_until_complete(run())
     # 未崩（跑到 exit 退）
@@ -456,7 +463,7 @@ def test_run_repl_server_timeout_sysexit_swallowed(capsys, monkeypatch):
     async def fake_collect(ws, msg):
         raise SystemExit(5)  # 模拟 send_and_recv 超时 sys.exit
     inputs = iter(["box --pos 0 0 0", "exit"])
-    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs, "exit"))
     async def run():
         with patch("forge_client.connect_and_handshake", new=fake_handshake), \
             patch("forge_client._collect", new=fake_collect):

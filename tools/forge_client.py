@@ -401,6 +401,11 @@ def _parse_repl_line(line):
             return None  # _build_batch_items 已打印
         return {"type": "generate_batch", "id": "r_batch", "items": items}
     if args.path is not None or args.path_file is not None or args.path_node is not None:
+        # I-1：path/path-file/path-node 三互斥（= run_path，REPL continue 友好返 None 不 sys.exit）
+        path_sources = [args.path, args.path_file, args.path_node]
+        if sum(1 for s in path_sources if s is not None) > 1:
+            print("--path / --path-file / --path-node 三互斥", file=sys.stderr)
+            return None
         path = _parse_path_arg(args)
         if path is None and args.path_node is None:
             return None  # path 解析失败（已打印）
