@@ -1,23 +1,12 @@
 # log_helper.gd
-# Asset Forge 集中式日志（带时间戳 + 信号广播）
+# Asset Forge 集中式日志（带时间戳，stdout 输出）。
+# P2-9：原 logged 信号 + _instance 单例已移除——信号全仓无人 connect（死信号），
+# 单例持 RefCounted 永不释放；日志只 print stdout（dock 日志区走 server.log_emitted，不经此）。
 @tool
 class_name LogHelper
 extends RefCounted
 
-signal logged(message: String)
-
-static var _instance: LogHelper = null
 const LOG_PREFIX := "[Asset Forge]"
-
-
-static func get_instance() -> LogHelper:
-	if _instance == null:
-		_instance = LogHelper.new()
-	return _instance
-
-
-static func release_instance() -> void:
-	_instance = null
 
 
 static func format_message(message: String) -> String:
@@ -27,9 +16,7 @@ static func format_message(message: String) -> String:
 static func log(message: String, enabled: bool = true) -> void:
 	if not enabled:
 		return
-	var formatted := format_message(message)
-	get_instance().emit_signal("logged", formatted)
-	print(formatted)
+	print(format_message(message))
 
 
 static func error(message: String, enabled: bool = true) -> void:
