@@ -249,6 +249,9 @@ def test_dispatch_falls_back_to_direct_when_no_daemon():
         # _shape 透传单条原始 result（含 type/id）
         assert result["success"] is True
         assert result["node_path"] == "/Root/box_1"
+        # M-1：锁死 _shape 透传语义（type/id 也透传，不被吞）
+        assert result["type"] == "generate_result"
+        assert result["id"] == "req_1"
         assert len(started) == 1  # 回退时触发了启 daemon
     asyncio.new_event_loop().run_until_complete(run())
 
@@ -275,3 +278,38 @@ def test_maybe_start_daemon_uses_stdio_trio(monkeypatch, tmp_path):
         assert captured["kwargs"].get("creationflags") == subprocess.CREATE_NO_WINDOW
     # 命令是 python -m forge_client --serve（或 __file__ --serve）
     assert "--serve" in captured["cmd"]
+
+
+# === v8 Task 3 fix（I-1）：run_stop 集成测（daemon 在 / 不在）===
+def test_run_stop_when_daemon_running(capsys):
+    """daemon 在：run_stop 发 stop → stdout 含 stopped + SystemExit code 0。
+    I-1：补 run_stop 集成测。启真假 daemon 监听 60651 回 {success,stopped}。"""
+    async def run():
+        async def fake_handle(reader, writer):
+            await reader.read(65536)
+            writer.write(json.dumps({"success": True, "stopped": True}).encode("utf-8"))
+            await writer.drain()
+        srv = await asyncio.start_server(fake_handle, "127.0.0.1", DAEMON_PORT)
+        async with srv:
+            with pytest.raises(SystemExit) as exc:
+                await run_stop(_make_args())
+            assert exc.value.code == 0
+            captured = capsys.readouterr()
+            assert "stopped" in captured.out
+            assert "daemon_not_running" not in captured.err
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_run_stop_when_daemon_not_running(capsys):
+    """daemon 不在：mock open_connection 抛 OSError → stderr 含 daemon_not_running + code 1。
+    I-1：补 run_stop 集成测。用 mock 避免真连 60651（测试隔离）。"""
+    async def fake_open_conn(*a, **kw):
+        raise OSError("mock：daemon 不在")
+    async def run():
+        with patch("forge_client.asyncio.open_connection", new=fake_open_conn):
+            with pytest.raises(SystemExit) as exc:
+                await run_stop(_make_args())
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "daemon_not_running" in captured.err
+    asyncio.new_event_loop().run_until_complete(run())

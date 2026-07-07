@@ -240,6 +240,7 @@ def maybe_start_daemon(args):
     if sys.platform == "win32":
         kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW  # 防控制台闪窗
     subprocess.Popen([sys.executable, __file__, "--serve"], **kwargs)  # 不等
+    log_f.close()  # I-2：子进程已继承独立 fd，父进程关自己的 fd 不泄漏
 
 
 # CLI 入口分流：daemon 在转发 / 不在直连 + 启 daemon（返逐 type 镜像 result）
@@ -248,7 +249,11 @@ async def dispatch(msg, args):
     if resp is not None:
         return resp  # daemon 返的逐 type 镜像
     # 回退直连（= 当前行为）+ 后台启 daemon（后续命令命中）
-    maybe_start_daemon(args)
+    # M-2：启 daemon best-effort，失败不影响当次直连
+    try:
+        maybe_start_daemon(args)
+    except OSError:
+        pass
     ws = await connect_and_handshake(args)
     try:
         results = await _collect(ws, msg)
@@ -264,11 +269,12 @@ async def run_stop(args):
         reader, writer = await asyncio.open_connection(DAEMON_HOST, DAEMON_PORT)
         writer.write(json.dumps(msg).encode("utf-8"))
         await writer.drain()
-        await reader.read(65536)  # daemon 回 {success:true,stopped:true} 后退
+        # I-3：read 加 5s 超时，daemon 不响应时按不在处理（防 run_stop 卡死）
+        await asyncio.wait_for(reader.read(65536), timeout=5.0)
         writer.close()
         print(json.dumps({"success": True, "stopped": True}, ensure_ascii=False))
         sys.exit(0)
-    except OSError:
+    except (OSError, asyncio.TimeoutError):
         print(json.dumps({"success": False, "error": "daemon_not_running"}), file=sys.stderr)
         sys.exit(1)
 
