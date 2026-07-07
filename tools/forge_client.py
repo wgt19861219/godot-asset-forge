@@ -198,7 +198,13 @@ async def serve(args):
             writer.close()
             last_active = time.monotonic()  # 活动刷新（含 stop）
 
-    srv = await asyncio.start_server(_handle_cli, DAEMON_HOST, DAEMON_PORT)
+    # v8 M-5：启动失败（端口占等）显式日志，daemon 退出 → CLI 回退直连
+    try:
+        srv = await asyncio.start_server(_handle_cli, DAEMON_HOST, DAEMON_PORT)
+    except OSError as e:
+        print("[daemon] 启动失败（端口占？）: %s" % str(e), flush=True)
+        await ws_server.close()
+        return
     try:
         async with srv:
             while not state["stop"]:
@@ -819,6 +825,7 @@ def _build_parser():
         action="store_true",
         help="path 模式 continuous：顶点对齐分段（顶点=段边界，转角不切角），仅 continuous+spacing",
     )
+	# v8 daemon
     p.add_argument("--serve", action="store_true", help="启动 daemon 常驻模式（后台保 WS，CLI 复用）")
     p.add_argument("--stop", action="store_true", help="停止 daemon")
     p.add_argument("--repl", action="store_true", help="进 REPL 交互模式（一个进程循环命令，省启动）")

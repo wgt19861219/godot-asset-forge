@@ -483,7 +483,9 @@ def test_build_parser_has_repl_flag():
 def test_repl_mutually_exclusive_with_shape():
     """--repl 与 shape 位置参数互斥（main 校验 → exit 2 + 互斥消息）。"""
     import subprocess, sys
+    # v9 M-6：cwd 相对化（os.path 跨环境），test 文件在 tests/ 下 → dirname 两次到项目根
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     r = subprocess.run([sys.executable, "-u", "tools/forge_client.py", "--repl", "box"],
-        capture_output=True, text=True, cwd="D:/GitHub/godot-asset-forge")
+        capture_output=True, text=True, cwd=project_root)
     assert r.returncode == 2
     assert "互斥" in r.stderr
