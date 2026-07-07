@@ -10,6 +10,8 @@ Asset Forge —— Godot 4.6（Forward+）EditorPlugin：bash 一行命令经 We
 
 ```bash
 # 跑全部测试（5 suite，headless，无需打开编辑器）
+# 注：godot 不在 PATH（bash 不解析 D:\godot\godot.cmd），用绝对路径调 console 版（带 stdout）：
+#     "/d/Godot/Godot_v4.6.3-stable_win64_console.exe" --headless --path . --script res://tests/test_runner.gd
 godot --headless --path . --script res://tests/test_runner.gd
 
 # 11 种 shape + undo 的活体自检（需先在 Godot 编辑器启用插件、打开一个场景）
