@@ -47,9 +47,13 @@ CLI → 直连 server 60650（当前 connect_and_handshake）→ 收 result → 
 
 ### IPC 协议
 
-- **CLI → daemon**：复用 server 消息 `{type, id, payload/items}`（generate / generate_batch / generate_path / undo_last）
-- **daemon → CLI**：聚合 `{success: bool, results: [...], count: int}`（与当前 `run_path`/`run_batch` 输出格式一致）
-- daemon 按 type 决定收齐策略：generate/undo 收 1 条，batch 按 n，path 按 total（D 方案，复用 `send_and_recv_batch`）
+- **CLI → daemon**：复用 server 消息 `{type, id, payload/items}`（generate / generate_batch / generate_path / undo_last）；另加 `{type: "stop"}`（`--stop` 用，复用 IPC 通道，daemon 收到即退）
+- **daemon → CLI**：**逐 type 镜像当前直连输出形状**（守不变量 #1，不统一 shaping）：
+  - generate / undo：原样返 server 的**单条 result**（`{type, id, success, node_path/error, ...}`，无 `results`/`count` 包装）
+  - generate_batch：返 `{success, results}`（无 `count`，对齐 `run_batch` :238-239）
+  - generate_path：返 `{success, results, count}`（对齐 `run_path` :361）
+- daemon 按 type 决定收齐策略：generate/undo 收 1 条（`send_and_recv`），batch 按 n、path 按 total（`send_and_recv_batch`）
+- **daemon 串行处理**（守不变量 #7）：单 WS 复用，一次只处理一个 CLI 请求（发 server → 收齐 → 返 CLI → 再下一个）。并发 CLI 请求在 daemon 内排队，**禁止并发转发**——当前 CLI 用固定 id（`req_1`/`r_batch`/`r_path`/`undo_1`），并发转发会在同一 WS 上撞 id 静默串结果
 
 ## 关键决策
 
@@ -76,11 +80,13 @@ CLI → 直连 server 60650（当前 connect_and_handshake）→ 收 result → 
 
 ## 必须守住的语义不变量
 
-1. **bash 一行用法零改变**：`python tools/forge_client.py fence --path '[[0,0,0],[32,0,0]]' --count 64 --mode continuous` 等所有现有命令形态、参数、输出格式（`{success, results, count}`）不变
+1. **bash 一行用法零改变**：`python tools/forge_client.py fence --path '[[0,0,0],[32,0,0]]' --count 64 --mode continuous` 等所有现有命令形态、参数、**输出格式逐字节不变**（generate/undo 单条 result、batch `{success,results}`、path `{success,results,count}`）。**退出码 `$?` 语义不变**：CLI 据 daemon 返回的 success 算 exit code（与直连一致），**非 daemon 进程的退出码**——daemon 是独立后台进程，其 exit code 不影响 CLI 的 $?
 2. **零回归**：daemon 不可用时 CLI 直连 = 当前行为（最差 = 现状）
 3. **不改 server / 协议**：`command_server.gd` 零改动，IPC 不引入新 server 消息类型
 4. **token 鉴权不绕过**：daemon 连 server 仍走 handshake token（读同一 token 文件，token 优先级不变）
-5. **batch per-item 散回执语义不变**（CLAUDE.md 不变量 4）：daemon 收齐后聚合返 CLI 是 **client 端聚合**（当前 `run_batch` 已是 client 聚合，:238-239），不改变 server 散回执
+5. **batch per-item 散回执语义不变**（CLAUDE.md 不变量 4）：daemon 收齐后返 CLI 是 **client 端收齐**（当前 `run_batch` 已是 client 聚合，:238-239），不改变 server 散回执
+6. **daemon idle < server keepalive**：`daemon_idle_timeout`（默认 60s）**必须严格 <** server `CLIENT_TIMEOUT_MSEC = 120000`（`command_server.gd:14`）。否则 daemon 静默持有已被 server 关闭的死 WS（僵尸 daemon），下条 CLI 请求必失败。约束：`daemon_idle_timeout < 120s`；用户命令突发间隔 5-30s，60s 充裕，至多调到 90s
+7. **daemon 串行**：单 WS 复用，daemon 一次只处理一个 CLI 请求（详见 IPC 协议），禁止并发转发（撞 id 串结果）
 
 ## 文件结构
 
@@ -104,7 +110,7 @@ CLI → 直连 server 60650（当前 connect_and_handshake）→ 收 result → 
 
 ## 风险 / 未决
 
-- **Windows `subprocess.Popen` 后台 daemon 的 stdout/stderr**：daemon 后台跑，stdout 不能干扰 CLI 的 JSON 输出。daemon 重定向 stdout/stderr 到日志文件（如 `%TEMP%/forge_client_daemon.log`）或 `DEVNULL`。**计划阶段定具体方式**。
+- **Windows `subprocess.Popen` 后台 daemon 的 stdio**（已定）：daemon 长寿命，崩了要能看 traceback → stdout/stderr 重定向到日志文件（`%TEMP%/forge_client_daemon.log`，**truncate-on-start** 防无限增长，非 DEVNULL）；防 Windows 控制台闪窗 → 用 `pythonw.exe` 或 `subprocess.CREATE_NO_WINDOW` creationflags；`stdin=DEVNULL` 防阻塞。
 - **daemon 与 CLI 的 token 一致性**：daemon 启动时读 token（同 CLI），server 重启换 token 时 daemon 的 WS 失效 → 返错 → CLI 回退直连。可接受（回退保证）。
 - **端口 60651 冲突**：若被占，daemon 启动失败 → CLI 回退直连。可接受（文档注明端口约定）。
 - **daemon 与既有 selftest 兼容**：`--selftest` 是一次性流程，不经 daemon（直连）。daemon 只加速常规 generate/batch/path/undo 命令。
