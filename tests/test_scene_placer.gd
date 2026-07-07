@@ -65,6 +65,39 @@ func run(runner) -> void:
 	ScenePlacer.undo_last(stack3)
 	runner.check(FileAccess.file_exists(path), "undo 后 .tscn 仍在（IMPORTANT-2：undo 不删 .tscn）")
 	DirAccess.remove_absolute(path)  # 清理
+	# === P2-10：_sanitize_name 防路径注入 + Windows 非法字符 ===
+	var s1 := ScenePlacer._sanitize_name("../../evil")
+	runner.check(
+		not s1.contains("/") and not s1.contains("."),
+		"P2-10：_sanitize_name('../../evil')='%s' 剥离 / 和 .（防路径逃逸）" % s1
+	)
+	runner.check(
+		ScenePlacer._sanitize_name("a/b") == "a_b",
+		"P2-10：_sanitize_name('a/b') = a_b（/ 替 _，不创建子目录）"
+	)
+	runner.check(
+		ScenePlacer._sanitize_name("a:b*c") == "a_b_c",
+		"P2-10：_sanitize_name('a:b*c') = a_b_c（Windows 非法字符 : * 替 _）"
+	)
+	runner.check(
+		ScenePlacer._sanitize_name("MyBox-01") == "MyBox-01",
+		"P2-10：_sanitize_name 保留合法字符（字母数字 _ -）"
+	)
+	runner.check(
+		ScenePlacer._sanitize_name("") == "asset",
+		"P2-10：_sanitize_name('') = asset（空回退）"
+	)
+	# P2-10：save 路径注入——name='../../evil' 应被 sanitize，文件落到 GENERATED_DIR 内（不逃逸覆盖项目 .tscn）
+	var stack_p210: Array = []
+	var rp210 := ScenePlacer.place(root, mesh, null, {"name": "../../evil", "save": true}, stack_p210, 50)
+	runner.check(bool(rp210["success"]), "P2-10：name='../../evil' place success")
+	var p210_path: String = rp210["resource_path"]
+	runner.check(
+		p210_path != "" and not p210_path.contains(".."),
+		"P2-10：save 路径注入被 sanitize（resource_path 不含 '..'，不逃逸 GENERATED_DIR）"
+	)
+	if p210_path != "" and FileAccess.file_exists(p210_path):
+		DirAccess.remove_absolute(p210_path)  # 清理
 	# A-1：transform.position 以 PackedFloat64Array 传入应正确解析（与 asset_factory._vec3 约定一致，非 Vector3.ZERO）
 	var stack4: Array = []
 	var rpf := ScenePlacer.place(

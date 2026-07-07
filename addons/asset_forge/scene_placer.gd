@@ -107,7 +107,8 @@ static func resolve_path3d(root: Node, path_node: String) -> Dictionary:
 
 
 static func _unique_node_name(parent: Node, base_name: String) -> String:
-	var nm := base_name if not base_name.is_empty() else "asset"
+	# P2-10：sanitize base_name（防 / .. 导致 NodePath 解析跳出兄弟 + Windows <>:"|?* 非法字符）
+	var nm := _sanitize_name(base_name)
 	if parent.get_node_or_null(NodePath(nm)) == null:
 		return nm
 	var i := 1
@@ -144,13 +145,32 @@ static func _vec3(d: Dictionary, key: String) -> Vector3:
 	return Vector3.ZERO
 
 
+# P2-10：sanitize 名字（节点名/文件名共用）——只留字母数字 + 下划线/连字符，其余替 '_'
+# 防 ../../ 路径注入（跳出 GENERATED_DIR 覆盖项目 .tscn）+ Windows <>:"|?* 非法字符
+static func _sanitize_name(name: String) -> String:
+	var sanitized := ""
+	for ch in name:
+		if (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_" or ch == "-":
+			sanitized += ch
+		else:
+			sanitized += "_"
+	if sanitized.is_empty():
+		sanitized = "asset"
+	return sanitized
+
+
 static func _save_as_tscn(node: Node, name: String) -> String:
-	DirAccess.make_dir_recursive_absolute(GENERATED_DIR)
+	# P2-10：检查 DirAccess 返回值（res:// 只读/权限不足不再静默继续 → 返 "" 让 client 知道）
+	var dir_err := DirAccess.make_dir_recursive_absolute(GENERATED_DIR)
+	if dir_err != OK:
+		LogHelper.error("ScenePlacer: 创建目录失败 %s（err=%d）" % [GENERATED_DIR, dir_err])
+		return ""
+	var safe_name := _sanitize_name(name)  # P2-10：防 ../../ 路径注入 + Windows 非法字符
 	var ps := PackedScene.new()
 	if ps.pack(node) != OK:
-		LogHelper.error("ScenePlacer: pack 失败 " + name)
+		LogHelper.error("ScenePlacer: pack 失败 " + safe_name)
 		return ""
-	var path := GENERATED_DIR.path_join(name + ".tscn")
+	var path := GENERATED_DIR.path_join(safe_name + ".tscn")
 	if ResourceSaver.save(ps, path) != OK:
 		LogHelper.error("ScenePlacer: save 失败 " + path)
 		return ""
