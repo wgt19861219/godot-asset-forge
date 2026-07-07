@@ -243,11 +243,16 @@ static func _add_face(
 	st.add_vertex(d)
 
 
-# --- 辅助：圆柱侧面加进 SurfaceTool（栅栏柱用，无顶/底盖）---
+# --- 辅助：圆柱（侧面 + 顶/底盖）加进 SurfaceTool（栅栏柱用）---
 static func _add_cylinder(
 	st: SurfaceTool, center: Vector3, radius: float, height: float, segments: int
 ) -> void:
-	# I-3：每顶点 set 径向法线（曲面 smooth）；与 _add_box 面法线各自独立，不依赖 generate_normals
+	# I-3：侧面每顶点 set 径向法线（曲面 smooth）；与 _add_box 面法线各自独立，不依赖 generate_normals
+	# P0-1：含顶/底盖 fan——栅栏柱独立站立，无盖则俯视柱顶/仰视柱底穿帮（看到内部/穿透地面）。
+	# 盖子叉积朝柱内（与侧面/_add_face 同 winding 约定 → cull 可见），set_normal 朝外（光照）；
+	# 不调 index()/generate_normals()（否则盖子与侧面共享环顶点被平滑，重蹈 I-3 覆辙）
+	var ct := center + Vector3(0.0, height / 2.0, 0.0)  # 顶盖中心
+	var cb := center + Vector3(0.0, -height / 2.0, 0.0)  # 底盖中心
 	for i in segments:
 		var a0: float = (float(i) / segments) * TAU
 		var a1: float = (float(i + 1) / segments) * TAU
@@ -269,3 +274,13 @@ static func _add_cylinder(
 		st.add_vertex(o1t)
 		st.set_normal(n0)
 		st.add_vertex(o0t)
+		# P0-1 顶盖 fan（set_normal +Y 朝上；绕序 ct,o0t,o1t 叉积朝柱内 -Y → 从上方俯视可见实心圆面）
+		st.set_normal(Vector3.UP)
+		st.add_vertex(ct)
+		st.add_vertex(o0t)
+		st.add_vertex(o1t)
+		# P0-1 底盖 fan（set_normal -Y 朝下；绕序 cb,o1b,o0b 叉积朝柱内 +Y → 从下方仰视可见）
+		st.set_normal(Vector3.DOWN)
+		st.add_vertex(cb)
+		st.add_vertex(o1b)
+		st.add_vertex(o0b)

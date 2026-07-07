@@ -295,10 +295,12 @@ func _handle_generate_path(
 	var base_name: String = String(payload.get("name", ""))
 	if base_name == "":
 		base_name = shape
+	# P0-2：仅当至少一段 place 成功才 mark_scene_as_unsaved（与单件 generate 一致，避免全失败时污染场景脏标记）
+	var any_success := false
 	if mode == "discrete":
 		for i in samples.size():
 			var s: Dictionary = samples[i]
-			_place_one(
+			var ok := _place_one(
 				root,
 				probe_mesh,
 				material,
@@ -312,6 +314,8 @@ func _handle_generate_path(
 				req_id,
 				ws
 			)
+			if ok:
+				any_success = true
 	else:  # continuous：每段独立 create_mesh（length + fence 端柱 / ramp 高度注入）
 		var seg_count: int = samples.size()
 		# v6：ramp 高度衔接，循环外算一次（仅 ramp 用，弧长基础非弦长）
@@ -334,7 +338,7 @@ func _handle_generate_path(
 				seg_params["start_height"] = float(ramp_heights[i]["start_h"])
 				seg_params["end_height"] = float(ramp_heights[i]["end_h"])
 			var seg_mesh := AssetFactory.create_mesh_uncached(shape, seg_params)  # v11.5：段 mesh 不进 _cache（一次性几何）
-			_place_one(
+			var seg_ok := _place_one(
 				root,
 				seg_mesh,
 				material,
@@ -348,7 +352,10 @@ func _handle_generate_path(
 				req_id,
 				ws
 			)
-	EditorInterface.mark_scene_as_unsaved()
+			if seg_ok:
+				any_success = true
+	if any_success:
+		EditorInterface.mark_scene_as_unsaved()
 
 
 # _place_one：构造 place_payload + ScenePlacer.place + send_result（discrete/continuous 共用，消除 loop 重复）
@@ -365,7 +372,7 @@ func _place_one(
 	total: int,  # v3 新增（D 方案：client 收第一条读 total 收齐）
 	req_id: String,
 	ws: WebSocketPeer
-) -> void:
+) -> bool:  # P0-2：返回成功与否，调用方累计 any_success 决定是否 mark_scene_as_unsaved
 	var pos: Vector3 = pos_var
 	var rot: Vector3 = rot_var
 	var place_payload := {
@@ -391,6 +398,7 @@ func _place_one(
 			_dock.add_to_generated_list(
 				String(place_payload["name"]), String(r["node_path"])
 			)
+		return true  # P0-2：成功（调用方累计 any_success）
 	else:
 		_server.send_result(
 			req_id,
@@ -398,3 +406,4 @@ func _place_one(
 			{"error": String(r["error"]), "message": "place 失败", "total": total},
 			ws
 		)
+		return false  # P0-2：失败

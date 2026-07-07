@@ -111,6 +111,29 @@ func run(runner) -> void:
 				has_up_facing = true  # 斜顶（上升/下降 Y>0）或水平顶（start==end 时 (0,1,0)）
 		runner.check(all_unit, "make_ramp %s 法线全归一化（模长≈1）" % label)
 		runner.check(has_up_facing, "make_ramp %s 存在朝上法线 Y>0.5（斜顶/水平顶）" % label)
+	# P0-1：_add_cylinder 有顶/底盖（fence 柱独立站立，无盖则俯视柱顶/仰视柱底穿帮看到内部/穿透地面）
+	# 直接调 private _add_cylinder 构造纯柱体（GDScript 下划线是约定，非强制访问限制）
+	var st_cyl := SurfaceTool.new()
+	st_cyl.begin(Mesh.PRIMITIVE_TRIANGLES)
+	CustomMeshes._add_cylinder(st_cyl, Vector3.ZERO, 0.5, 2.0, 12)
+	var cyl_mesh: ArrayMesh = st_cyl.commit()
+	runner.check(cyl_mesh is ArrayMesh, "_add_cylinder commit → ArrayMesh")
+	var cyl_arrays: Array = cyl_mesh.surface_get_arrays(0)
+	var cyl_normals: PackedVector3Array = cyl_arrays[Mesh.ARRAY_NORMAL]
+	# 每 segment 12 顶点（侧面 6 + 顶盖 3 + 底盖 3），12 segment → 144（无盖旧版仅 72）
+	runner.check(
+		cyl_mesh.surface_get_array_len(0) == 12 * 12,
+		"_add_cylinder 顶点 = 12/segment（含盖，实际 %d）" % cyl_mesh.surface_get_array_len(0)
+	)
+	var cyl_has_top := false  # 顶盖 +Y 法线（侧面径向法线 Y=0，+Y 仅来自顶盖）
+	var cyl_has_bot := false  # 底盖 -Y 法线
+	for nv in cyl_normals:
+		if nv.y > 0.9:
+			cyl_has_top = true
+		elif nv.y < -0.9:
+			cyl_has_bot = true
+	runner.check(cyl_has_top, "_add_cylinder 有顶盖（存在 +Y 法线，俯视柱顶实心不穿帮）")
+	runner.check(cyl_has_bot, "_add_cylinder 有底盖（存在 -Y 法线，仰视柱底实心不穿帮）")
 
 
 # v5 _post_xs 单测辅助：逐元素 is_equal_approx 比较浮点数组（posts=4 含 t=1/3 → -0.5 浮点，不能直接 ==）
