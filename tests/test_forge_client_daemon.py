@@ -368,3 +368,99 @@ def test_build_batch_items_not_list_returns_none(capsys):
     args = _args(["batch", "--items", '{"shape":"box"}'])  # dict 非 list
     items = _build_batch_items(args)
     assert items is None
+
+
+# === v9 Task 2: _parse_repl_line + run_repl ===
+from forge_client import _parse_repl_line, run_repl
+
+
+def test_parse_repl_line_exit():
+    assert _parse_repl_line("exit") == "exit"
+    assert _parse_repl_line("quit") == "exit"
+
+
+def test_parse_repl_line_generate():
+    msg = _parse_repl_line("box --pos 1 0 0")
+    assert msg["type"] == "generate"
+    assert msg["payload"]["shape"] == "box"
+
+
+def test_parse_repl_line_undo():
+    msg = _parse_repl_line("undo")
+    assert msg["type"] == "undo_last"
+
+
+def test_parse_repl_line_batch():
+    msg = _parse_repl_line("batch box wall")
+    assert msg["type"] == "generate_batch"
+    assert msg["items"] == [{"shape": "box"}, {"shape": "wall"}]
+
+
+def test_parse_repl_line_path():
+    msg = _parse_repl_line("path fence --path '[[0,0,0],[10,0,0]]' --count 5 --mode continuous")
+    assert msg["type"] == "generate_path"
+    assert msg["payload"]["shape"] == "fence"
+    assert msg["payload"]["count"] == 5
+
+
+def test_parse_repl_line_mat_invalid_json_returns_none(capsys):
+    """--mat 畸形 JSON → None（已提示，不抛、不退）。"""
+    msg = _parse_repl_line("box --mat '{bad json'")
+    assert msg is None
+
+
+def test_parse_repl_line_rejects_selftest_serve_stop():
+    """REPL 内禁 selftest/serve/stop（REPL 是命令循环，非进程控制）。"""
+    assert _parse_repl_line("--selftest") is None
+    assert _parse_repl_line("--serve") is None
+    assert _parse_repl_line("--stop") is None
+
+
+def test_run_repl_loop_multiple_commands_then_exit(capsys, monkeypatch):
+    """run_repl 多命令循环 + exit 退（mock ws + input 序列）。"""
+    fake_ws = FakeWS([
+        {"type": "generate_result", "id": "req_1", "success": True, "node_path": "/Root/box_0"},
+        {"type": "generate_result", "id": "undo_1", "success": True},
+    ])
+    async def fake_handshake(args):
+        return fake_ws
+    inputs = iter(["box --pos 0 0 0", "undo", "exit"])
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+    async def run():
+        with patch("forge_client.connect_and_handshake", new=fake_handshake):
+            await run_repl(_make_args())
+    asyncio.new_event_loop().run_until_complete(run())
+    out = capsys.readouterr().out
+    assert '"success": true' in out or '"success":true' in out  # 两条命令都 print result
+    assert fake_ws.sent[0]["type"] == "generate"
+
+
+def test_run_repl_command_error_continues(capsys, monkeypatch):
+    """单命令 --mat 畸形 → continue 不退（再敲 exit 退）。"""
+    async def fake_handshake(args):
+        return FakeWS([])
+    import asyncio
+    async def run():
+        with patch("forge_client.connect_and_handshake", new=fake_handshake):
+            inputs = iter(["box --mat '{bad'", "exit"])
+            monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+            await run_repl(_make_args())
+    asyncio.new_event_loop().run_until_complete(run())
+    # 未崩（跑到 exit 退）
+
+
+def test_run_repl_server_timeout_sysexit_swallowed(capsys, monkeypatch):
+    """单命令 _collect 内 sys.exit(5)（模拟 send_and_recv 超时）→ try/except SystemExit 吞 → continue。"""
+    async def fake_handshake(args):
+        return FakeWS([])
+    async def fake_collect(ws, msg):
+        raise SystemExit(5)  # 模拟 send_and_recv 超时 sys.exit
+    inputs = iter(["box --pos 0 0 0", "exit"])
+    monkeypatch.setattr("builtins.input", lambda *a, **kw: next(inputs))
+    async def run():
+        with patch("forge_client.connect_and_handshake", new=fake_handshake), \
+            patch("forge_client._collect", new=fake_collect):
+            await run_repl(_make_args())  # sys.exit 被吞，continue 到 exit，不崩
+    asyncio.new_event_loop().run_until_complete(run())
+    err = capsys.readouterr().err
+    assert "超时" in err or "错误" in err  # 提示跳过

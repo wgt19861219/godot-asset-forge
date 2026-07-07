@@ -14,6 +14,7 @@ import asyncio
 import json
 import math
 import os
+import shlex
 import sys
 import time
 from pathlib import Path
@@ -370,6 +371,95 @@ def _build_batch_items(args):
         return [{"shape": s} for s in args.batch_shapes]
     print("batch 需要 --items '<json>' 或位置参数 shape 名", file=sys.stderr)
     return None
+
+
+# === v9 REPL：行 → server msg（复用 _build_parser + build_* + 分流，c1 决策）===
+def _parse_repl_line(line):
+    """REPL 输入行 → server msg（dict） / "exit"（退） / None（解析失败/空/禁用命令，已提示）。
+    零改 build_*：复用 _build_parser（c1）+ build_payload/build_path_payload。"""
+    line = line.strip()
+    if line == "":
+        return None  # 空行
+    if line in ("exit", "quit"):
+        return "exit"
+    tokens = shlex.split(line)
+    try:
+        args = _build_parser().parse_args(tokens)
+    except SystemExit:
+        # argparse 错（--help / 畸形参数）→ 提示 continue（argparse 已打印 usage）
+        return None
+    # REPL 内禁进程控制命令（selftest/serve/stop）
+    if getattr(args, "selftest", False) or getattr(args, "serve", False) or getattr(args, "stop", False):
+        print("REPL 内不支持 --selftest/--serve/--stop，请退出后用 bash 执行", file=sys.stderr)
+        return None
+    # 分流（复用 build_*，与 main 一致；不含 dispatch/print/sys.exit）
+    if args.shape == "undo":
+        return {"type": "undo_last", "id": "undo_1"}
+    if args.shape == "batch":
+        items = _build_batch_items(args)
+        if items is None:
+            return None  # _build_batch_items 已打印
+        return {"type": "generate_batch", "id": "r_batch", "items": items}
+    if args.path is not None or args.path_file is not None or args.path_node is not None:
+        path = _parse_path_arg(args)
+        if path is None and args.path_node is None:
+            return None  # path 解析失败（已打印）
+        # predict_n 校验（仅 path/path_file，path_node 靠 server total）
+        if args.path_node is None:
+            n = predict_n(path, args.spacing if args.spacing is not None else 0.0,
+                args.count if args.count is not None else 0, not args.no_endpoints,
+                args.mode, args.align_vertices)
+            if n == 0:
+                print("path 参数错误：需 --spacing >0 或 --count >=1", file=sys.stderr)
+                return None
+            if n > 64:
+                print(f"采样点 {n} 超过 BATCH_LIMIT 64", file=sys.stderr)
+                return None
+        # build_path_payload 内 --mat 畸形会 sys.exit(2)；吞 → None（守不变量 #3：单命令错误不退）
+        try:
+            payload = build_path_payload(args, path)
+        except SystemExit:
+            return None  # build_path_payload 已打印错误
+        return {"type": "generate_path", "id": "r_path", "payload": payload}
+    if args.shape:
+        # build_payload 内 --mat 畸形会 sys.exit(2)；吞 → None（守不变量 #3）
+        try:
+            payload = build_payload(args)
+        except SystemExit:
+            return None  # build_payload 已打印错误
+        return {"type": "generate", "id": "req_1", "payload": payload}
+    print("未知命令（shape 名 / batch / undo / path / exit）", file=sys.stderr)
+    return None
+
+
+# v9 REPL 主循环：直连 server 一次 + 循环读命令（省 python 启动 + handshake）
+async def run_repl(args):
+    print("Asset Forge REPL。命令同 bash（fence/box/batch/path/undo），exit 退。")
+    ws = await connect_and_handshake(args)  # 一次，保 WS（v8 既有 :282）
+    try:
+        while True:
+            try:
+                line = await asyncio.to_thread(input, "forge> ")  # Python 3.9+，不阻塞 event loop
+            except (EOFError, KeyboardInterrupt):
+                break  # Ctrl+D / Ctrl+C → 退
+            result = _parse_repl_line(line)
+            if result == "exit":
+                break
+            if result is None:
+                continue  # 解析失败/禁用命令，已提示
+            msg = result
+            try:
+                results = await _collect(ws, msg)  # v8 收齐
+                print(json.dumps(_shape(msg, results), ensure_ascii=False))  # v8 镜像（逐字节 = bash）
+            except SystemExit:
+                # 命门 #1：吞 send_and_recv 内部超时 sys.exit(5)（防单命令超时杀 REPL）
+                print("[命令超时/错误，已跳过]", file=sys.stderr)
+                continue
+            except OSError as e:
+                print(f"[连接错误，退出 REPL: {e}]", file=sys.stderr)
+                break  # WS 断 → 退（YAGNI 不重连）
+    finally:
+        await ws.close()
 
 
 async def run_batch(args):
