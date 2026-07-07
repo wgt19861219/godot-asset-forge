@@ -22,15 +22,15 @@
 
 ### 入口
 
-`forge_client --repl`（新增 argparse 选项，main 分流，先于 shape/selftest）
+`forge_client --repl`（新增 argparse 选项，main 分流，先于 shape/selftest；**与 shape/位置参数互斥**——`--repl` 独占）
 
 ### REPL 流程
 
-1. `connect_and_handshake` server（**一次**，保 `ws`，复用 v8 既有 :137）
+1. `connect_and_handshake` server（**一次**，保 `ws`，复用 v8 既有 :282）
 2. 循环：
    - `input("forge> ")`（读一行）
    - `exit`/`quit`/`EOFError`（Ctrl+D）→ break
-   - `_parse_repl_line(line) -> msg|None`（shlex split + 复用 `build_payload`/`build_path_payload` 逻辑；解析失败 → 提示错误 + continue）
+   - `_parse_repl_line(line) -> msg|None`（shlex split + 复用 main 的 argparse parser（`parse_args(tokens)`）+ 分流逻辑，**零改 `build_*`**；解析失败 → 提示错误 + continue）
    - `results = await _collect(ws, msg)` + `print(json.dumps(_shape(msg, results), ensure_ascii=False))`（复用 v8 纯函数，输出格式逐字节 = bash CLI）
    - 异常（解析/server）→ 提示 + continue（**单命令错误不退 REPL**）
 3. `await ws.close()` + `sys.exit(0)`
@@ -46,7 +46,7 @@ REPL：     forge_client --repl → 直连 server（一次 WS）→ 循环命令
 
 ### 命令格式（复用 bash 子命令）
 
-`shlex.split(line)` → 复用 `build_payload(args)` / `build_path_payload(args, path)` / batch / undo 逻辑构造 `msg`：
+`shlex.split(line)` → 重建 main 的 argparse parser（`parse_args(tokens)`）→ 复用 main 分流（generate/batch/path/undo）→ 构造 `msg`（**零改 `build_*`**，一套语法）：
 - **generate**：`fence`/`box`/... + params（`--size`/`--pos`/`--mat`/...）
 - **batch**：`batch box wall ramp`
 - **path**：`path fence --path '[[0,0,0],[32,0,0]]' --count 64 --mode continuous`
@@ -61,7 +61,7 @@ REPL：     forge_client --repl → 直连 server（一次 WS）→ 循环命令
 
 1. **v8 daemon / bash 一行 CLI 零改变**（v9 叠加，不替代 v8；v8 的 35 测试零回归）
 2. **REPL 输出格式逐字节 = bash CLI**（复用 `_shape`：generate/undo 单条原始 result、batch `{success,results}`、path `{success,results,count}`）
-3. **REPL 单命令错误不退**（解析失败/server error → 提示 + continue 循环）；`exit`/`quit`/Ctrl+D → `ws.close` + 退
+3. **REPL 单命令错误不退**（解析失败/server error → 提示 + continue 循环）。**`try/except SystemExit` 吞 `_collect`→`send_and_recv` 内部超时 `sys.exit(5)`**（防单命令超时杀 REPL，命门 #1）；`KeyboardInterrupt`（Ctrl+C）/`exit`/`quit`/Ctrl+D → `ws.close` + 退
 4. **REPL 直连 server**（不经 daemon，一个 python 进程 + 一次 WS 复用）
 5. **不改 server / 协议**（command_server.gd 零改动，REPL 用既有 generate/batch/path/undo 消息）
 
@@ -79,17 +79,17 @@ REPL：     forge_client --repl → 直连 server（一次 WS）→ 循环命令
 | 层 | 方法 | 覆盖 |
 |---|---|---|
 | `_parse_repl_line` | pytest（纯函数，shlex + 解析） | generate/batch/path/undo 各 → msg 正确；`exit`/`quit` → 退出标记；畸形行 → None（不崩） |
-| `run_repl` 循环 | pytest（mock ws + `input` 行序列 via `monkeypatch`） | 多命令循环 + exit 退 + 单命令错误继续 + 输出逐字节（复用 _shape） |
+| `run_repl` 循环 | pytest（mock ws + `input` 行序列 via `monkeypatch`） | 多命令循环 + exit 退 + 单命令错误继续 + **server 超时 `sys.exit` 被 `try/except SystemExit` 吞 → continue** + **`--mat` 畸形 JSON → continue** + **WS 断 → 提示退** + 输出逐字节（复用 _shape） |
 | 端到端 | 编辑器 REPL 实测（同 v8 Step 8） | 连续 10 命令 ~5x 收益验证 |
 
 - `_parse_repl_line` 是纯函数（无 ws），pytest 易测
 - `run_repl` 用 `monkeypatch.setattr("builtins.input", side_effect=[...])` 模拟输入序列 + mock ws
 
-## 风险 / 未决（计划阶段定）
+## 已决策（reviewer 审查裁定）
 
-- **`_parse_repl_line` 复用 `build_*` 逻辑**：`build_payload(args)`/`build_path_payload(args, path)` 当前依赖 argparse `args` 对象（属性访问）。REPL 从 shlex line 构造 msg 有两条路：(a) 抽 `_build_msg(tokens)` 公共函数（build_* + REPL 共用，DRY，但改 build_* 签名）；(b) REPL 内 mini-parse tokens → msg（重复 build_* 逻辑）。**倾向 (a) DRY**，plan 阶段定具体抽取边界。
-- **`input()` 同步阻塞 + asyncio**：`run_repl` 是 async（`_collect` await），但 `input()` 同步阻塞 event loop。解法：`await asyncio.to_thread(input, "forge> ")`（Python 3.9+）或 `loop.run_in_executor`。plan 阶段定。
-- **REPL 内 argparse 复用**：main 的 argparse 一次解析 sys.argv。REPL 多次解析每行。若用方案 (a) 抽 `_build_msg(tokens)`，则不经 argparse（直接 tokens → msg）；若复用 argparse，需重建 parser 实例。**方案 (a) 避开此问题**。
+- **复用方式 = c1**（重建 main argparse parser）：`shlex.split(line)` → 重建 parser → `parse_args(tokens)` → 复用 main 分流。**零改 `build_*`** + 兑现「一套语法」+ 自动消解「argparse 复用」风险。
+- **`input()` 阻塞 = `asyncio.to_thread`**：`await asyncio.to_thread(input, "forge> ")`（Python 3.9+），不阻塞 event loop。
+- **sys.exit 冲突（命门 #1）= `try/except SystemExit`**：`run_repl` 循环体包 `try/except SystemExit`，吞 `_collect`→`send_and_recv` 内部超时的 `sys.exit(5)`，单命令超时 → continue（守不变量 #3），不杀 REPL。
 
 ## 与 v8 的关系
 
