@@ -43,6 +43,15 @@ func run(runner) -> void:
 		PathGenerator.validate(line, 0.0, 1, "path", false) == "",
 		"validate count=1 endpoints=false 合法（F5）"
 	)
+	# P0-3：count 上限（防恶意/错误 client 构造超大 count 切极多段，绕过 spacing 互斥）
+	runner.check(
+		PathGenerator.validate(line, 0.0, 10000, "path", false, "continuous") == "",
+		"validate count=10000 合法（上限边界）"
+	)
+	runner.check(
+		PathGenerator.validate(line, 0.0, 10001, "path", false, "continuous") != "",
+		"validate count=10001 → invalid（超上限，P0-3）"
+	)
 
 	# === sample：spacing 模式 ===
 	var s1 := PathGenerator.sample(line, 1.0, 0, "path", true)  # [0,1,2,3,4] = 5
@@ -172,6 +181,16 @@ func run(runner) -> void:
 	var dup := [Vector3(0, 0, 0), Vector3(2, 0, 0), Vector3(2, 0, 0), Vector3(4, 0, 0)]
 	var cd := PathGenerator.sample(dup, 0.0, 3, "path", true, "continuous")  # total=4，3 等长段
 	runner.check(cd.size() == 3, "continuous 跨局部重合点（count 模式段数 = N）")
+	# P0-3：_sample_continuous 防御性 early-return（validate 应已拦 spacing<=0+count<1，
+	# 但 sample 是 public，恶意/错误 client 直接调也不崩，defense-in-depth）
+	runner.check(
+		PathGenerator._sample_continuous(line, 0.0, -5, true).is_empty(),
+		"_sample_continuous count 负数注入 → 返空不崩（P0-3 defense-in-depth）"
+	)
+	runner.check(
+		PathGenerator._sample_continuous(line, 0.0, 0, true).is_empty(),
+		"_sample_continuous count=0+spacing=0 → 返空不崩（P0-3）"
+	)
 	# === validate continuous ===
 	runner.check(
 		PathGenerator.validate(line, 1.0, 0, "none", true, "continuous") != "",

@@ -48,6 +48,9 @@ static func validate(
 		return "spacing 与 count 只能二选一"
 	if not has_spacing and not has_count:
 		return "必须提供 spacing（>0）或 count（>=1）之一"
+	# P0-3：count 上限（防恶意/错误 client 构造超大 count 切极多段，绕过 spacing 互斥）
+	if has_count and count > 10000:
+		return "count 过大（最大 10000，当前 %d）" % count
 	# F5：count=1 + endpoints 仅 discrete 模式拦截（continuous count=1 = 1 段，合法）
 	if mode == "discrete" and has_count and count == 1 and include_endpoints:
 		return "count==1 时 include_endpoints 必须为 false（含两端至少 2 个采样点）"
@@ -108,6 +111,10 @@ static func sample(
 static func _sample_continuous(
 	points: Array, spacing: float, count: int, include_endpoints: bool, align_vertices := false
 ) -> Array:
+	# P0-3：defense-in-depth early-return（validate 应已拦 spacing<=0 + count<1，
+	# 但 sample 是 public，恶意/错误 client 直接调也不崩，不静默落入空 boundaries 分支）
+	if spacing <= 0.0 and count < 1:
+		return []
 	var last: int = points.size() - 1
 	var seg_len: Array = []
 	var vertex_d: Array = [0.0]  # v4：va 分支激活此字段（v2 算完未用，死代码转核心）
