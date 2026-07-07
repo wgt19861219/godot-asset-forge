@@ -134,6 +134,47 @@ func run(runner) -> void:
 			cyl_has_bot = true
 	runner.check(cyl_has_top, "_add_cylinder 有顶盖（存在 +Y 法线，俯视柱顶实心不穿帮）")
 	runner.check(cyl_has_bot, "_add_cylinder 有底盖（存在 -Y 法线，仰视柱底实心不穿帮）")
+	# P1-7：cone/tube 去掉 index()+generate_normals()，底面边缘硬边
+	# 底圆周顶点（排除底中心）应同时持有底面 -Y 法线 + 侧面斜法线（cone）/径向法线（tube），
+	# 即同位置不同法线 → 硬边；旧版 index 合并 + generate_normals 平滑会平均成单一法线（假圆角）
+	var cone_p17 := CustomMeshes.make_cone({"height": 1.0, "radius": 0.5, "segments": 12})
+	var cone_arr := cone_p17.surface_get_arrays(0)
+	var cone_v: PackedVector3Array = cone_arr[Mesh.ARRAY_VERTEX]
+	var cone_n: PackedVector3Array = cone_arr[Mesh.ARRAY_NORMAL]
+	var cone_bot_face := false  # 底圆周顶点的 -Y 底面法线
+	var cone_side_face := false  # 底圆周顶点的侧面斜法线（Y>0.1）
+	for idx in cone_v.size():
+		var cv: Vector3 = cone_v[idx]
+		# 底圆周：y≈-0.5 且 x²+z²>0.1（排除底中心 (0,-0.5,0)）
+		if absf(cv.y - (-0.5)) < 0.01 and (cv.x * cv.x + cv.z * cv.z) > 0.1:
+			var cn: Vector3 = cone_n[idx]
+			if cn.y < -0.9:
+				cone_bot_face = true
+			elif cn.y > 0.1:
+				cone_side_face = true
+	runner.check(
+		cone_bot_face and cone_side_face,
+		"cone 底圆边缘硬边（底面 -Y + 侧面斜法线共存，未被平滑，P1-7）"
+	)
+	var tube_p17 := CustomMeshes.make_tube({"height": 1.0, "radius": 0.5, "thickness": 0.1, "segments": 12})
+	var tube_arr := tube_p17.surface_get_arrays(0)
+	var tube_v: PackedVector3Array = tube_arr[Mesh.ARRAY_VERTEX]
+	var tube_n: PackedVector3Array = tube_arr[Mesh.ARRAY_NORMAL]
+	var tube_bot_face := false  # 底外环顶点的 -Y 底环法线
+	var tube_side_face := false  # 底外环顶点的外侧面径向法线（|Y|<0.1）
+	for idx in tube_v.size():
+		var tv: Vector3 = tube_v[idx]
+		# 底外环：y≈-0.5 且 x²+z²≈radius²=0.25（排除内环 i_b≈0.16）
+		if absf(tv.y - (-0.5)) < 0.01 and absf(tv.x * tv.x + tv.z * tv.z - 0.25) < 0.01:
+			var tn: Vector3 = tube_n[idx]
+			if tn.y < -0.9:
+				tube_bot_face = true
+			elif absf(tn.y) < 0.1:
+				tube_side_face = true
+	runner.check(
+		tube_bot_face and tube_side_face,
+		"tube 底外环边缘硬边（底环 -Y + 外侧面径向共存，未被平滑，P1-7）"
+	)
 
 
 # v5 _post_xs 单测辅助：逐元素 is_equal_approx 比较浮点数组（posts=4 含 t=1/3 → -0.5 浮点，不能直接 ==）

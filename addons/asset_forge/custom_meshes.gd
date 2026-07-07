@@ -7,6 +7,10 @@ extends RefCounted
 
 
 # --- cone 圆锥 ---
+# --- cone 圆锥 ---
+# P1-7：每顶点手设法线，不调 index()/generate_normals()（否则底圆周顶点 v0/v1 被合并 →
+# 侧面斜法线与底面 -Y 被 generate_normals 平滑成圆角，重蹈 I-3）。
+# 侧面斜法线 = 母线 (r,yb)→(0,yt) 的朝外垂直方向 (cos(a)*h, r, sin(a)*h)/L；apex 奇点用 UP。
 static func make_cone(params: Dictionary) -> ArrayMesh:
 	var height: float = float(params.get("height", 1.0))
 	var radius: float = float(params.get("radius", 0.5))
@@ -15,23 +19,38 @@ static func make_cone(params: Dictionary) -> ArrayMesh:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var yb := -height / 2.0
 	var yt := height / 2.0
+	var apex := Vector3(0.0, yt, 0.0)
+	var cb := Vector3(0.0, yb, 0.0)
+	# 母线长（侧面斜法线归一化用；maxf 防退化 height=radius=0 除零）
+	var side_len := maxf(sqrt(height * height + radius * radius), 1e-6)
 	for i in segments:
 		var a0: float = (float(i) / segments) * TAU
 		var a1: float = (float(i + 1) / segments) * TAU
 		var v0 := Vector3(cos(a0) * radius, yb, sin(a0) * radius)
 		var v1 := Vector3(cos(a1) * radius, yb, sin(a1) * radius)
+		var n0 := Vector3(cos(a0) * height, radius, sin(a0) * height) / side_len  # v0 侧面斜法线
+		var n1 := Vector3(cos(a1) * height, radius, sin(a1) * height) / side_len  # v1 侧面斜法线
+		# 侧面三角形（v0,v1,apex）：每顶点手设侧面斜法线（winding 保留，几何朝向不变）
+		st.set_normal(n0)
 		st.add_vertex(v0)
+		st.set_normal(n1)
 		st.add_vertex(v1)
-		st.add_vertex(Vector3(0.0, yt, 0.0))  # 侧面
-		st.add_vertex(Vector3(0.0, yb, 0.0))
+		st.set_normal(Vector3.UP)  # apex 奇点（所有侧面平均 → 纯上）
+		st.add_vertex(apex)
+		# 底面三角形（cb,v1,v0）：全 -Y（winding 不变，几何朝下）
+		st.set_normal(Vector3.DOWN)
+		st.add_vertex(cb)
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(v1)
-		st.add_vertex(v0)  # 底面（法线 -Y）
-	st.index()
-	st.generate_normals()
+		st.set_normal(Vector3.DOWN)
+		st.add_vertex(v0)
 	return st.commit()
 
 
 # --- tube 空心圆柱 ---
+# --- tube 空心圆柱 ---
+# P1-7：4 面（外侧面/内侧面/顶环/底环）各自手设法线，不调 index()/generate_normals()
+# （否则环顶点被合并 → 外侧径向与底环 -Y 等被平滑成圆角，重蹈 I-3）。
 static func make_tube(params: Dictionary) -> ArrayMesh:
 	var height: float = float(params.get("height", 1.0))
 	var radius: float = float(params.get("radius", 0.5))
@@ -53,32 +72,62 @@ static func make_tube(params: Dictionary) -> ArrayMesh:
 		var i1b := Vector3(cos(a1) * inner, yb, sin(a1) * inner)
 		var i0t := Vector3(cos(a0) * inner, yt, sin(a0) * inner)
 		var i1t := Vector3(cos(a1) * inner, yt, sin(a1) * inner)
+		var no0 := Vector3(cos(a0), 0.0, sin(a0))  # o0 径向朝外
+		var no1 := Vector3(cos(a1), 0.0, sin(a1))  # o1 径向朝外
+		var ni0 := -no0  # i0 径向朝内
+		var ni1 := -no1  # i1 径向朝内
+		# 外侧面（o0b,o1b,o0t)+(o1b,o1t,o0t)：径向朝外（winding 保留，几何朝向不变）
+		st.set_normal(no0)
 		st.add_vertex(o0b)
+		st.set_normal(no1)
 		st.add_vertex(o1b)
-		st.add_vertex(o0t)  # 外侧面
+		st.set_normal(no0)
+		st.add_vertex(o0t)
+		st.set_normal(no1)
 		st.add_vertex(o1b)
+		st.set_normal(no1)
 		st.add_vertex(o1t)
+		st.set_normal(no0)
 		st.add_vertex(o0t)
+		# 内侧面（i0b,i0t,i1b)+(i1b,i0t,i1t)：径向朝内（反向）
+		st.set_normal(ni0)
 		st.add_vertex(i0b)
+		st.set_normal(ni0)
 		st.add_vertex(i0t)
-		st.add_vertex(i1b)  # 内侧面（反向）
+		st.set_normal(ni1)
 		st.add_vertex(i1b)
+		st.set_normal(ni1)
+		st.add_vertex(i1b)
+		st.set_normal(ni0)
 		st.add_vertex(i0t)
+		st.set_normal(ni1)
 		st.add_vertex(i1t)
+		# 顶环（o0t,o1t,i1t)+(o0t,i1t,i0t)：+Y
+		st.set_normal(Vector3.UP)
 		st.add_vertex(o0t)
+		st.set_normal(Vector3.UP)
 		st.add_vertex(o1t)
-		st.add_vertex(i1t)  # 顶环
-		st.add_vertex(o0t)
+		st.set_normal(Vector3.UP)
 		st.add_vertex(i1t)
+		st.set_normal(Vector3.UP)
+		st.add_vertex(o0t)
+		st.set_normal(Vector3.UP)
+		st.add_vertex(i1t)
+		st.set_normal(Vector3.UP)
 		st.add_vertex(i0t)
+		# 底环（o0b,i1b,o1b)+(o0b,i0b,i1b)：-Y
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(o0b)
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(i1b)
-		st.add_vertex(o1b)  # 底环（-Y）
+		st.set_normal(Vector3.DOWN)
+		st.add_vertex(o1b)
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(o0b)
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(i0b)
+		st.set_normal(Vector3.DOWN)
 		st.add_vertex(i1b)
-	st.index()
-	st.generate_normals()
 	return st.commit()
 
 
