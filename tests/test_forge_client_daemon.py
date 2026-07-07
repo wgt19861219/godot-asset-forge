@@ -29,6 +29,7 @@ def test_collect_generate_single():
     assert len(results) == 1
     assert results[0]["node_path"] == "/Root/box_0"
     assert ws.sent[0]["type"] == "generate"
+    assert len(ws.sent) == 1  # 锁死单 send 不变量
 
 
 def test_collect_undo_single():
@@ -37,18 +38,20 @@ def test_collect_undo_single():
     msg = {"type": "undo_last", "id": "undo_1"}
     results = asyncio.run(_collect(ws, msg))
     assert len(results) == 1
+    assert len(ws.sent) == 1  # 锁死单 send 不变量
 
 
 def test_collect_batch_by_n():
     """generate_batch：send_and_recv_batch 按 n 收齐。"""
     ws = FakeWS([
-        {"type": "generate_result", "id": "r_batch", "success": True, "total": 3},
-        {"type": "generate_result", "id": "r_batch", "success": True, "total": 3},
-        {"type": "generate_result", "id": "r_batch", "success": True, "total": 3},
+        {"type": "generate_result", "id": "r_batch", "success": True},
+        {"type": "generate_result", "id": "r_batch", "success": True},
+        {"type": "generate_result", "id": "r_batch", "success": True},
     ])
     msg = {"type": "generate_batch", "id": "r_batch", "items": [{"shape": "box"}, {"shape": "wall"}, {"shape": "ramp"}]}
     results = asyncio.run(_collect(ws, msg))
     assert len(results) == 3
+    assert len(ws.sent) == 1  # 锁死单 send 不变量
 
 
 def test_collect_path_by_total():
@@ -60,6 +63,7 @@ def test_collect_path_by_total():
     msg = {"type": "generate_path", "id": "r_path", "payload": {"shape": "fence"}}
     results = asyncio.run(_collect(ws, msg))
     assert len(results) == 2
+    assert len(ws.sent) == 1  # 锁死单 send 不变量
 
 
 def test_shape_generate_no_wrapping():
@@ -96,3 +100,11 @@ def test_shape_path_with_count():
     results = [{"success": True, "total": 2}, {"success": True, "total": 2}]
     shaped = _shape(msg, results)
     assert shaped == {"success": True, "results": results, "count": 2}
+
+
+def test_shape_unknown_type():
+    """unknown_type：兜底返 unknown_type error（保留兜底 + 覆盖）。"""
+    msg = {"type": "bogus"}
+    results = [{"success": True}]
+    shaped = _shape(msg, results)
+    assert shaped == {"success": False, "error": "unknown_type"}
