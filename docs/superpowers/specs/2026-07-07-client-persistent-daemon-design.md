@@ -28,7 +28,7 @@
 
 ### 进程模型（2 个 python 进程）
 
-1. **daemon**（`forge_client --serve`，后台）：常驻，保 server WS（60650），监听本地 TCP 60651，转发 CLI 命令 → server，收齐 result → 聚合返 CLI
+1. **daemon**（`forge_client --serve`，后台）：常驻，保 server WS（60650），监听本地 TCP 60651，转发 CLI 命令 → server，按 type 收齐 result → 逐 type 镜像返 CLI
 2. **CLI**（`forge_client.py <shape>`，前台，入口不变）：检测 daemon → IPC 转发；不在 → 直连 server（兼容）+ 后台 `subprocess.Popen` 启 daemon
 
 ### 数据流
@@ -36,7 +36,7 @@
 **命中 daemon**（第 2 条起）：
 ```
 CLI → TCP 60651 → daemon → WS 60650 → server
-result 原路：server → daemon（send_and_recv_batch 收齐）→ 聚合 {success,results,count} → CLI 打印
+result 原路：server → daemon（按 type 收齐：generate/undo 用 send_and_recv 收 1 条、batch/path 用 send_and_recv_batch）→ 逐 type 镜像输出形状 → CLI 打印
 ```
 
 **首条命令**（daemon 没起）：
@@ -63,7 +63,7 @@ CLI → 直连 server 60650（当前 connect_and_handshake）→ 收 result → 
 | daemon 启动 | 自动 fork（首条 CLI 触发，Popen 后台） | 用户无感，bash 用法不变 |
 | daemon 退出 | 空闲 60s / server WS 断 / `--stop` | 防泄漏 + 跟随 server 生命周期 |
 | 兼容 | CLI 连 daemon 失败 → 直连 server | 零回归，daemon 是加速层非必需层 |
-| daemon 收齐 | 复用 `send_and_recv_batch` | 不重新发明收齐逻辑 |
+| daemon 收齐 | 复用 `send_and_recv`（单条）/ `send_and_recv_batch`（多 result） | 不重新发明收齐逻辑 |
 | CLI 连 daemon 超时 | 200ms | 短，快速回退直连 |
 
 ## 错误处理（直连回退矩阵）
