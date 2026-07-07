@@ -313,3 +313,58 @@ def test_run_stop_when_daemon_not_running(capsys):
         captured = capsys.readouterr()
         assert "daemon_not_running" in captured.err
     asyncio.new_event_loop().run_until_complete(run())
+
+
+# === v9 Task 1：_build_parser + _build_batch_items（DRY 重构 main/run_batch，零行为改变）===
+import shlex
+from forge_client import _build_parser, _build_batch_items
+
+
+def _args(tokens):
+    """shlex + _build_parser 解析 tokens → args（测试 helper）。"""
+    return _build_parser().parse_args(tokens)
+
+
+def test_build_parser_parses_generate():
+    """_build_parser 解析 generate 命令（box + params）。"""
+    args = _args(shlex.split("box --pos 1 2 3"))
+    assert args.shape == "box"
+    assert list(args.pos) == [1.0, 2.0, 3.0]
+
+
+def test_build_parser_parses_path():
+    """_build_parser 解析 path 子命令。"""
+    args = _args(shlex.split("path fence --path '[[0,0,0],[10,0,0]]' --count 5 --mode continuous"))
+    assert args.shape == "path"
+    assert args.batch_shapes == ["fence"]
+    assert args.count == 5
+    assert args.mode == "continuous"
+
+
+def test_build_batch_items_from_positional():
+    """_build_batch_items 位置参数 → items 列表。"""
+    args = _args(["batch", "box", "wall", "ramp"])
+    items = _build_batch_items(args)
+    assert items == [{"shape": "box"}, {"shape": "wall"}, {"shape": "ramp"}]
+
+
+def test_build_batch_items_from_items_json():
+    """_build_batch_items --items JSON → items。"""
+    args = _args(["batch", "--items", '[{"shape":"box"},{"shape":"fence","params":{"length":3}}]'])
+    items = _build_batch_items(args)
+    assert items == [{"shape": "box"}, {"shape": "fence", "params": {"length": 3}}]
+
+
+def test_build_batch_items_invalid_json_returns_none(capsys):
+    """_build_batch_items --items 畸形 JSON → None（已打印错误，不 sys.exit）。"""
+    args = _args(["batch", "--items", "{not json"])
+    items = _build_batch_items(args)
+    assert items is None
+    assert "JSON" in capsys.readouterr().err  # 已打印 JSON 解析失败
+
+
+def test_build_batch_items_not_list_returns_none(capsys):
+    """_build_batch_items --items 非 array → None。"""
+    args = _args(["batch", "--items", '{"shape":"box"}'])  # dict 非 list
+    items = _build_batch_items(args)
+    assert items is None

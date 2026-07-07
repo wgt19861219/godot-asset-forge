@@ -351,28 +351,33 @@ async def run_undo(args):
     sys.exit(0 if result.get("success") else 1)
 
 
-async def run_batch(args):
-    """构造 items（--items JSON 字符串，或 batch shape1 shape2 ... 位置参数），
-    发 generate_batch，收齐 n 条 per-item 散 result，打印聚合 JSON。"""
-    items = []
+def _build_batch_items(args):
+    """构造 batch items（--items JSON 字符串或 batch_shapes 位置参数）。
+    失败返 None（已打印错误，不 sys.exit——调用方决定 exit/continue；REPL continue 友好）。"""
     # 优先 --items JSON 字符串
     if args.items:
         try:
             parsed = json.loads(args.items)
             if not isinstance(parsed, list):
                 print("--items 必须是 JSON 数组", file=sys.stderr)
-                sys.exit(2)
-            items = parsed
+                return None
+            return parsed
         except json.JSONDecodeError as e:
             print(f"--items JSON 解析失败: {e}", file=sys.stderr)
-            sys.exit(2)
+            return None
     # 位置参数：每个 shape 名展开为 {"shape": <name>}
-    elif args.batch_shapes:
-        for s in args.batch_shapes:
-            items.append({"shape": s})
-    else:
-        print("batch 需要 --items '<json>' 或位置参数 shape 名", file=sys.stderr)
-        sys.exit(2)
+    if args.batch_shapes:
+        return [{"shape": s} for s in args.batch_shapes]
+    print("batch 需要 --items '<json>' 或位置参数 shape 名", file=sys.stderr)
+    return None
+
+
+async def run_batch(args):
+    """构造 items（--items JSON 字符串，或 batch shape1 shape2 ... 位置参数），
+    发 generate_batch，收齐 n 条 per-item 散 result，打印聚合 JSON。"""
+    items = _build_batch_items(args)
+    if items is None:
+        sys.exit(2)  # 保留既有 exit code 2 行为（_build_batch_items 已打印错误）
 
     msg = {"type": "generate_batch", "id": "r_batch", "items": items}
     result = await dispatch(msg, args)  # {success, results}（无 count，_shape 保证）
@@ -675,7 +680,9 @@ async def run_selftest(args):
     sys.exit(0 if all_ok else 1)
 
 
-def main():
+def _build_parser():
+    """构造 CLI argparse parser（main + REPL 共用，Task 3 在此加 --repl）。
+    与原 main 内联段逐字一致（参数名/类型/默认/help/choices），零行为改变。"""
     p = argparse.ArgumentParser(description="Asset Forge bash 客户端")
     # batch 子命令支持：batch shape1 shape2 ... 位置参数（nargs="*"），与单 shape 互斥
     p.add_argument("shape", nargs="?", help="shape 名，或 undo，或 batch（接多个 shape 名），或省略走 --selftest")
@@ -719,6 +726,11 @@ def main():
     )
     p.add_argument("--serve", action="store_true", help="启动 daemon 常驻模式（后台保 WS，CLI 复用）")
     p.add_argument("--stop", action="store_true", help="停止 daemon")
+    return p
+
+
+def main():
+    p = _build_parser()
     args = p.parse_args()
     if args.serve:
         asyncio.run(serve(args)); return
