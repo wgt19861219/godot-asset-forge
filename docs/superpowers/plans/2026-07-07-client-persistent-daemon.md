@@ -680,6 +680,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>"
 
 **预期**：连续多条命令端到端从 N×600ms 降到 600ms + (N-1)×40ms（首条启 daemon，后续命中）；输出格式逐字节不变；selftest/单条命令零回归。
 
+**实测结论（2026-07-07 Step 8 已跑）**：预期**高估**——把「省 handshake」误当「省 python 启动」。实测 box 单件：v8 前 ~307ms/条（python 启动 ~150 + handshake ~150 + server ~7），v8 后 daemon 命中 ~174ms/条（python ~150 + IPC + server ~7）。**真实收益 = 省 handshake ~133ms/条（命中后 1.8x），连续 10 条 ~1.4x（非估算 6x）**。python 启动（~150-300ms）仍是单条命令大头，v8 没省（CLI 每次新 python 进程）。要真达 6x 需 CLI 常驻（v9 候选）。另发现 `--stop` 退出延迟 3-5s（`serve` 循环 `sleep(1)` 间隔 + 端口异步释放，功能 OK 感知慢，v8.1 候选优化）。功能正确：daemon 转发 + 输出逐字节不变 + 35 测试零回归 + `--stop` 最终退出。
+
 ## 守不变量自检清单（实施时逐条对）
 
 - [ ] generate/undo 输出 = 单条原始 result（无 results/count）
