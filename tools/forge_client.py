@@ -15,6 +15,7 @@ import json
 import math
 import os
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -158,6 +159,53 @@ def _shape(msg, results):
     if t == "generate_path":
         return {"success": success, "results": results, "count": len(results)}  # 有 count（对齐 run_path 聚合）
     return {"success": False, "error": "unknown_type"}
+
+
+# === v8 daemon 常量 ===
+DAEMON_HOST = "127.0.0.1"
+DAEMON_PORT = 60651
+DAEMON_IDLE_TIMEOUT = 60  # 守不变量 #6：必须 < server CLIENT_TIMEOUT_MSEC=120s（command_server.gd:14）
+DAEMON_CONNECT_TIMEOUT = 0.2  # CLI 连 daemon 超时，超时回退直连
+
+
+# daemon 主循环：连 server + 监听 IPC + 串行转发 + 空闲/stop 退出
+async def serve(args):
+    ws_server = await connect_and_handshake(args)  # 复用既有，保 WS
+    last_active = time.monotonic()
+    state = {"stop": False}
+    lock = asyncio.Lock()  # 守不变量 #7：串行（一次一个 CLI 请求）
+
+    async def _handle_cli(reader, writer):
+        nonlocal last_active
+        try:
+            data = await reader.read(65536)
+            msg = json.loads(data.decode("utf-8"))
+            if msg.get("type") == "stop":  # --stop 用
+                state["stop"] = True
+                writer.write(json.dumps({"success": True, "stopped": True}, ensure_ascii=False).encode("utf-8"))
+                await writer.drain()
+                return
+            # 串行：lock 保证一次只处理一个 CLI 请求（固定 id 并发会撞）
+            async with lock:
+                results = await _collect(ws_server, msg)
+                resp = _shape(msg, results)
+            writer.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
+            await writer.drain()
+        except (OSError, json.JSONDecodeError, asyncio.TimeoutError):
+            pass  # 单连接错误不杀 daemon
+        finally:
+            writer.close()
+            last_active = time.monotonic()  # 活动刷新（含 stop）
+
+    srv = await asyncio.start_server(_handle_cli, DAEMON_HOST, DAEMON_PORT)
+    try:
+        async with srv:
+            while not state["stop"]:
+                await asyncio.sleep(1)  # 每 1s 检查空闲 + stop
+                if time.monotonic() - last_active > DAEMON_IDLE_TIMEOUT:
+                    break  # 空闲超时退出（防僵尸 daemon）
+    finally:
+        await ws_server.close()
 
 
 async def connect_and_handshake(args):

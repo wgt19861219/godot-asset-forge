@@ -13,6 +13,8 @@ class FakeWS:
         self.sent.append(json.loads(text))
     async def recv(self):
         return json.dumps(self._responses.pop(0))
+    async def close(self):
+        pass  # mock websockets 协议契约（真实连接对象有 close）
 
 
 # 导入被测函数（forge_client 在 tools/）
@@ -108,3 +110,92 @@ def test_shape_unknown_type():
     results = [{"success": True}]
     shaped = _shape(msg, results)
     assert shaped == {"success": False, "error": "unknown_type"}
+
+
+# === v8 Task 2：daemon serve + _handle_cli 集成测（mock connect_and_handshake + 真 socket 连 daemon）===
+from unittest.mock import AsyncMock, patch
+from forge_client import serve, DAEMON_PORT, DAEMON_IDLE_TIMEOUT
+
+
+async def _start_daemon_with_mock_server(server_responses, stop_after=2.0):
+    """启动真 daemon（mock server WS）+ 一个真 CLI socket 连它，返回 CLI 收到的响应。
+    stop_after 秒后强制取消 daemon（测空闲退出另写）。"""
+    cli_responses = []
+
+    async def fake_connect_and_handshake(args):
+        return FakeWS(list(server_responses))
+
+    async def cli_task():
+        await asyncio.sleep(0.3)  # 等 daemon 起来
+        try:
+            reader, writer = await asyncio.open_connection("127.0.0.1", DAEMON_PORT)
+            for msg in [
+                {"type": "generate", "id": "req_1", "payload": {"shape": "box"}},
+            ]:
+                writer.write(json.dumps(msg).encode("utf-8"))
+                await writer.drain()
+                data = await asyncio.wait_for(reader.read(65536), timeout=5.0)
+                cli_responses.append(json.loads(data.decode("utf-8")))
+            writer.close()
+        except OSError:
+            pass
+
+    with patch("forge_client.connect_and_handshake", new=fake_connect_and_handshake):
+        serve_task = asyncio.create_task(serve(_make_args()))
+        cli_task_obj = asyncio.create_task(cli_task())
+        await asyncio.wait_for(cli_task_obj, timeout=stop_after)
+        serve_task.cancel()
+        try:
+            await serve_task
+        except asyncio.CancelledError:
+            pass
+    return cli_responses
+
+
+def _make_args():
+    """最小 args mock（connect_and_handshake 被 patch，token 不读）。"""
+    class A: pass
+    a = A()
+    a.godot_user_dir = None
+    return a
+
+
+def test_serve_forwards_generate_single_shape():
+    """daemon 转发 generate → 透传单条 result（无 results/count 包装，守不变量 #1）。
+    daemon 镜像直连 run_generate：透传 server 原始字段（type/id/success/node_path），不加包装。"""
+    responses = [{"type": "generate_result", "id": "req_1", "success": True, "node_path": "/Root/box_0"}]
+    cli_responses = asyncio.new_event_loop().run_until_complete(_start_daemon_with_mock_server(responses))
+    assert len(cli_responses) == 1
+    assert cli_responses[0]["success"] is True
+    assert cli_responses[0]["node_path"] == "/Root/box_0"
+    assert "results" not in cli_responses[0]  # 单条，无聚合包装
+    assert "count" not in cli_responses[0]
+
+
+def test_serve_idle_timeout_exits():
+    """daemon 空闲 DAEMON_IDLE_TIMEOUT 后自动退出（测短超时）。"""
+    async def run():
+        async def fake_handshake(args):
+            return FakeWS([])
+        with patch("forge_client.connect_and_handshake", new=fake_handshake), \
+             patch("forge_client.DAEMON_IDLE_TIMEOUT", 1):  # 缩到 1s 加速测试
+            task = asyncio.create_task(serve(_make_args()))
+            await asyncio.sleep(1.5)  # 超过 1s 空闲
+            assert task.done(), "daemon 应在空闲超时后退出"
+    asyncio.new_event_loop().run_until_complete(run())
+
+
+def test_serve_stop_message_exits():
+    """CLI 发 {type:stop} → daemon 退出。"""
+    async def run():
+        async def fake_handshake(args):
+            return FakeWS([])
+        with patch("forge_client.connect_and_handshake", new=fake_handshake):
+            task = asyncio.create_task(serve(_make_args()))
+            await asyncio.sleep(0.3)
+            reader, writer = await asyncio.open_connection("127.0.0.1", DAEMON_PORT)
+            writer.write(json.dumps({"type": "stop"}).encode("utf-8"))
+            await writer.drain()
+            await asyncio.wait_for(task, timeout=2.0)
+            assert task.done(), "daemon 应收到 stop 后退出"
+    asyncio.new_event_loop().run_until_complete(run())
