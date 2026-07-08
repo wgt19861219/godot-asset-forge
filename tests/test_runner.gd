@@ -1,7 +1,7 @@
 # test_runner.gd
 # Asset Forge 独立项目 minimal 测试运行器（headless）。
 # 用法：godot --headless --path <项目根> --script res://tests/test_runner.gd
-# 注册 5 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer。
+# 注册 6 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer / Orchestrator。
 extends SceneTree
 
 var _passed: int = 0
@@ -25,6 +25,7 @@ func _process(_delta: float) -> bool:
 	_run_suite("PathGenerator", preload("res://tests/test_path_generator.gd").new())
 	_run_suite("ScenePlacer", preload("res://tests/test_scene_placer.gd").new())
 	_run_suite("CommandServer", preload("res://tests/test_command_server.gd").new())
+	_run_suite("Orchestrator", preload("res://tests/test_orchestrator.gd").new())  # claim 5 第 6 suite
 	print("\n=== Results: %d passed, %d failed ===" % [_passed, _failed])
 	quit(1 if _failed > 0 else 0)
 	return true  # 主循环继续（quit 会退出，返回值无实际意义）
