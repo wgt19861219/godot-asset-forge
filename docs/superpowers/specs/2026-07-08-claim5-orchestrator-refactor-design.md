@@ -36,7 +36,7 @@ class_name Orchestrator extends RefCounted
 # 本类零 EditorInterface 依赖 → 可 headless 单测。
 
 # R1（duck typing 换可测性）：_server 是唯一需 mock 的有状态依赖，去 AssetForgeServer 强类型注解。
-# MockServer（inner class extends RefCounted）才注得进去。损失的类型安全由 21 case 补回。
+# MockServer（inner class extends RefCounted）才注得进去。损失的类型安全由 22 case 补回。
 var _server: RefCounted = null
 # IMPORTANT-2（修订）：clear 责任单一 + 生命周期跟 plugin；Orchestrator 持【非所有者引用】。
 # GDScript Array 引用语义：Orchestrator 存成员后 append/pop 直达 plugin 的栈；_exit_tree.clear() 仍由 plugin 执行。
@@ -129,14 +129,15 @@ class MockServer extends RefCounted:
 - **root**：`Node3D.new()` + `runner.root.add_child(root)`（沿用 test_scene_placer 范式，使 ScenePlacer.place 的绝对 NodePath 解析生效）。
 - **P1-5 竞态 mock**：`var n=[0]; _get_root = func(): n[0]+=1; return root if n[0]==1 else null` —— 第一次 place 取到 root、第二次 mark 前取到 null，断言 `_mark_unsaved` 未被调。
 
-## 6. 测试范围（21 case，`test_orchestrator.gd` 注册第 6 suite）
+## 6. 测试范围（22 case，`test_orchestrator.gd` 注册第 6 suite）
 
 **A. 分支路由 + 错误码**（v11.5 核心 6 + 扩展）
 1. undo 成功（`__undo=true` → undo_last + send_result；**R7：成功 message 必须为 `"freed %d"`**）
 2. undo nothing_to_undo（空栈 → error）
 3a. unsupported_shape 单件（`:88-89` create_mesh 返 null）
 3b. unsupported_shape path（`:282-296` create_mesh_uncached 返 null）
-4. no_active_scene（`_get_root` 返 null；单件 generate `:110-116` 与 path `:156-159` 两条路径都断言 no_active_scene——**1 case 覆盖两处**，与 A.3 拆 2 case 不同：A.4 两处同错误码同文案，A.3 两处是不同拦截点 create_mesh vs create_mesh_uncached）
+4a. no_active_scene 单件（`_get_root` 返 null；`:113` message = "无活动场景，请先在编辑器新建或打开场景再 generate"）
+4b. no_active_scene path（`_get_root` 返 null；`:157` message = "无活动场景"——**两处文案不同**，已 grep 实证 `addons/asset_forge/asset_forge_plugin.gd:113/157`，与 A.3 同理拆 2 case）
 5. path↔path_node 互斥（同时有 `:161-168` + 都无 `:169-176`）
 6. mode 非 discrete/continuous（`:146-152`）
 7. continuous 白名单（shape 非 wall/fence/ramp，`:263-274`）
@@ -169,20 +170,20 @@ class MockServer extends RefCounted:
 | 步 | 动作 | 验证 |
 |---|---|---|
 | 1 | 创建 `orchestrator.gd` 骨架 + 从 plugin **复制** `_on_command`/`_handle_generate_path`/`_place_one`（最小改动：EditorInterface → Callable，`_server`/`_undo_stack`/`_dock` → 成员）。**plugin 暂不切换**（旧逻辑原地，selftest 仍走旧路） | 现有 5 suite 跑通（搬迁只动新文件，不碰旧类） |
-| 2 | 注册 `test_orchestrator.gd` 第 6 suite，**逐 case TDD**：写测（红）→ 调 Orchestrator → 修搬迁小错 → 绿。21 case 全绿 = 新类被钉死 | 21 case PASS |
+| 2 | 注册 `test_orchestrator.gd` 第 6 suite，**逐 case TDD**：写测（红）→ 调 Orchestrator → 修搬迁小错 → 绿。22 case 全绿 = 新类被钉死 | 22 case PASS |
 | 3 | **切换 plugin**：`_on_command` 改 1 行透传 `_orch.handle_command`，**删除** plugin 旧 `_handle_generate_path`/`_place_one`，加 3 个包装方法 `_get_root`/`_mark_unsaved`/`_dock_add` | grep 确认旧方法无残留调用点 |
 | 4 | 跑全 6 suite + `forge_client.py --selftest` | 6 suite 全 PASS + selftest 24 项全 PASS = 零回归 |
 
-**步骤 2 关键约束（补 selftest 盲区）**：selftest 只覆盖成功路径 + batch 原子 undo，error/竞态/边界零覆盖。故写每个 error/竞态 case 时，**断言依据必须 grep 旧 plugin 精确行为**（error code 字符串、message 文案、send_result 字段名），不是凭设计意图写——21 case 同时承担「旧行为回归测试」角色。行号指引：
+**步骤 2 关键约束（补 selftest 盲区）**：selftest 只覆盖成功路径 + batch 原子 undo，error/竞态/边界零覆盖。故写每个 error/竞态 case 时，**断言依据必须 grep 旧 plugin 精确行为**（error code 字符串、message 文案、send_result 字段名），不是凭设计意图写——22 case 同时承担「旧行为回归测试」角色。行号指引：
 - A.3a/3b（unsupported_shape）：读 `:92-105`（单件 message 文案）+ `:282-296`（path message 文案）
-- A.4（no_active_scene）：读 `:110-116` + `:156-159`，核对两处 message 是否一致
+- A.4a/A.4b（no_active_scene）：读 `:113`（单件长文案）+ `:157`（path 短文案），**两处文案不同**（已 grep 实证），分别断言各自 message
 - A.6（mode）/ A.7（continuous 白名单）：读 `:146-152` + `:263-274`
 - A.1/D.19（undo 成功）：**message 必须为 `"freed %d"`**（R7 selftest 硬依赖）
 
 ## 8. 风险清单
 
-- **R1** `_server` 类型注解：`AssetForgeServer` → `RefCounted`（duck typing 换可测性，MockServer 才注得进）。损失的类型安全由 21 case 补回。
-- **R2** 搬迁 ~338 行等价性：21 case + selftest 双重验证；逐分支保留 `IMPORTANT-N`/`Q-N`/`A-N` 标记。
+- **R1** `_server` 类型注解：`AssetForgeServer` → `RefCounted`（duck typing 换可测性，MockServer 才注得进）。损失的类型安全由 22 case 补回。
+- **R2** 搬迁 ~338 行等价性：22 case + selftest 双重验证；逐分支保留 `IMPORTANT-N`/`Q-N`/`A-N` 标记。
 - **R3** `_undo_stack` 非所有者引用：注释改「clear 责任单一 + 非所有者引用」，`_exit_tree` 清空仍由 plugin。
 - **R4** P1-5 竞态双调 `_get_root`：mock 双值（C.17/C.18）。
 - **R5** 切换后确认 plugin 旧 `_handle_generate_path`/`_place_one` 无其它调用点（grep）。
@@ -196,7 +197,7 @@ class MockServer extends RefCounted:
 | 不变量 3 batch 原子 undo（Q4） | 编排层透传 batch_id | D.19 |
 | 不变量 1 undo 不删 `.tscn`（IMPORTANT-2） | ScenePlacer.undo_last 不变 | **test_scene_placer.gd:57-67 已覆盖，编排层不重测** |
 | 不变量 4 BATCH_LIMIT=64（IMPORTANT-4） | pre_est + samples 两道拦截 | A.9/A.10 |
-| no_active_scene | `_get_root` 返 null 拦截 | A.4 |
+| no_active_scene | `_get_root` 返 null 拦截 | A.4a/A.4b |
 | `_resolve_parent` 不建中间节点 | ScenePlacer.place 不变 | E.20 |
 | continuous 白名单 wall/fence/ramp | 校验链不变 | A.7 |
 | P1-5 竞态 mark | `_get_root` Callable 双调 + can_mark_scene | C.17/C.18 |
@@ -205,11 +206,11 @@ class MockServer extends RefCounted:
 
 **batch 不经编排层聚合**（spec 注明）：`command_server.gd:285-288` 显示 server 层把 `generate_batch` items 循环拆 emit 成多个单件 generate（共享同 `_batch_counter`），编排层 `handle_command` 收到的永远是单件，**编排层无 batch 聚合逻辑**。D.19 用「连续 2 次 `handle_command` 传同 batch_id」正确模拟此（编排层视角等同 server 层拆 emit 的两个单件）。
 
-## 10. 测试覆盖互补（selftest ↔ 21 case）
+## 10. 测试覆盖互补（selftest ↔ 22 case）
 
-selftest（24 项）与 21 case **互补非重叠**：
+selftest（24 项）与 22 case **互补非重叠**：
 
-| 覆盖维度 | selftest 24 项 | 21 case |
+| 覆盖维度 | selftest 24 项 | 22 case |
 |---|---|---|
 | 真实 EditorInterface 端到端 | ✅（最高风险：Callable 注入在真实编辑器工作） | ❌（mock _get_root） |
 | 成功路径（11 shape + 6 path） | ✅ | ✅（B.14-16） |
@@ -218,14 +219,14 @@ selftest（24 项）与 21 case **互补非重叠**：
 | P1-5 竞态 | ❌ | ✅（C 组） |
 | P0-2 全失败不 mark | ❌ | ✅（E 组） |
 | undo nothing_to_undo | ❌ | ✅（A.2） |
-| save=true 存 `.tscn` | ❌（编排层） | ✅（B.14；test_scene_placer 测 ScenePlacer 层） |
+| save=true 存 `.tscn` | ❌（selftest 无 save case） | ✅（B.14；test_scene_placer 测 ScenePlacer 层） |
 
-结论：搬迁 error/竞态分支时 selftest 提供不了行为基线，**21 case 是唯一防线**（→ 步骤 2 grep 旧 plugin 约束）；搬迁成功路径 + callable 注入时 selftest 是端到端真相（→ 步骤 4 selftest 24 项是切换后回归闸）。
+结论：搬迁 error/竞态分支时 selftest 提供不了行为基线，**22 case 是唯一防线**（→ 步骤 2 grep 旧 plugin 约束）；搬迁成功路径 + callable 注入时 selftest 是端到端真相（→ 步骤 4 selftest 24 项是切换后回归闸）。
 
 ## 11. 验收标准（对齐 asset-forge v11.5 claim 5）
 
-1. `test_orchestrator.gd` **21 case 全 PASS**（A.3 拆单件/path两处）
-2. 全 **6 suite** headless 跑通：`"/d/Godot/Godot_v4.6.3-stable_win64_console.exe" --headless --path . --script res://tests/test_runner.gd`
+1. `test_orchestrator.gd` **22 case 全 PASS**（A.3 拆单件/path两处）
+2. 全 **6 suite** headless 跑通：`godot --headless --path . --script res://tests/test_runner.gd`（Godot 4.6+；本机 godot 不在 PATH 时用 console 版绝对路径，见 `CLAUDE.md`）
 3. `forge_client.py --selftest` **24 项全 PASS**（活体验证搬迁零回归 + callable 注入在真实编辑器工作）
 4. `plugin.gd` 编排逻辑迁出，退化为胶水（~30 行）；`orchestrator.gd` 新增 `class_name Orchestrator extends RefCounted`
 5. `IMPORTANT-N`/`Q-N`/`A-N` 标记全部保留；IMPORTANT-2 注释按 R3 修正；undo message 保持 `"freed %d"`（R7）
