@@ -53,6 +53,8 @@ func run(runner) -> void:
 			"A.1 R7：undo message='%s' 必须为 'freed N'（selftest 硬依赖，不得改文案）" % msg_a1
 		)
 		runner.check(msg_a1 == "freed 1", "A.1 undo freed=1（栈内 1 节点）")
+	# undo 分支只 send_result，不触发 mark/dock（显式验不污染脏标记）
+	runner.check(not bool(marked_a1[0]), "A.1 undo 不触发 _mark_unsaved（undo 无 place）")
 
 	# [后续 case 在此处追加]
 
@@ -236,10 +238,10 @@ func run(runner) -> void:
 			"A.8 message 含 '采样点为 0'"
 		)
 
-	# === A.9 pre_est 超上限（spacing 路径 :215 分支）===
+	# === A.9 pre_est 超上限（spacing 模式 pre_est 计算分支）===
 	# 注：spec 标 samples>BATCH_LIMIT，但 pre_est 是上界，samples 永远 ≤ pre_est，
-	# samples>BATCH_LIMIT 是不可达死防线。A.9 改测 spacing 路径的 pre_est 拦截，
-	# 与 A.10（count 路径 :217 分支）互补，覆盖 pre_est 两个计算分支。
+	# samples>BATCH_LIMIT 是不可达死防线。A.9 改测 spacing 模式的 pre_est 拦截，
+	# 与 A.10（count 模式 pre_est 计算分支）互补，覆盖 pre_est 两个计算分支。
 	var mock_a9 := MockServer.new()
 	var orch_a9 := _make_orch(mock_a9, [], root, [false], [])
 	orch_a9.handle_command(
@@ -260,7 +262,7 @@ func run(runner) -> void:
 			"A.9 message 含 '采样点预估'"
 		)
 
-	# === A.10 pre_est 超上限（count 路径 :217 分支）===
+	# === A.10 pre_est 超上限（count 模式 pre_est 计算分支）===
 	var mock_a10 := MockServer.new()
 	var orch_a10 := _make_orch(mock_a10, [], root, [false], [])
 	orch_a10.handle_command(
@@ -389,7 +391,7 @@ func run(runner) -> void:
 	runner.check(bool(marked_b16[0]), "B.16 any_success → _mark_unsaved 被调")
 
 	# === C.17 单件 generate 场景切走（place 成功但 mark 前 root 失效 → _mark_unsaved 不调）===
-	# _get_root 第一次（:72 取 root place）返 root，第二次（:98 mark 前 can_mark_scene 第二参数）返 null
+	# _get_root 第一次（handle_command 单件取 root place）返 root，第二次（单件 mark 前 can_mark_scene 第二参数）返 null
 	var mock_c17 := MockServer.new()
 	var marked_c17 := [false]
 	var calls_c17 := [0]
@@ -408,8 +410,8 @@ func run(runner) -> void:
 		# P1-5 核心：place 成功但场景切走 → mark 不触发
 		runner.check(not bool(marked_c17[0]), "C.17 P1-5：场景切走 → _mark_unsaved 不触发（can_mark_scene 守住）")
 
-	# === C.18 continuous path 场景切走（段 place 成功但 :326 mark 前 root 失效 → mark 不触发）===
-	# 覆盖 path 分支的 mark 校验点 :326（与 C.17 单件 :98 互补）
+	# === C.18 continuous path 场景切走（段 place 成功但 path mark 前 root 失效 → mark 不触发）===
+	# 覆盖 path 分支的 mark 校验点（与 C.17 单件 mark 点互补）
 	var mock_c18 := MockServer.new()
 	var marked_c18 := [false]
 	var calls_c18 := [0]
@@ -429,7 +431,7 @@ func run(runner) -> void:
 		18, ws
 	)
 	runner.check(mock_c18.sent.size() == 2, "C.18 2 段 place 成功（2 条 result）")
-	runner.check(not bool(marked_c18[0]), "C.18 P1-5：path 场景切走 → _mark_unsaved 不触发（:326 can_mark_scene 守住）")
+	runner.check(not bool(marked_c18[0]), "C.18 P1-5：path 场景切走 → _mark_unsaved 不触发（path mark 点 can_mark_scene 守住）")
 
 	# === D.19 batch 原子 undo 经编排层（同 batch_id=200 连续 2 次 generate → undo freed=2，R7）===
 	# 验编排层透传 batch_id 给 ScenePlacer（batch 原子语义在 ScenePlacer 已测，此处验编排层透传对）
