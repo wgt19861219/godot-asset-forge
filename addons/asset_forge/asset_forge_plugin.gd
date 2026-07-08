@@ -29,6 +29,7 @@ func _exit_tree() -> void:
 		_server.stop()
 		_server = null
 	_undo_stack.clear()  # IMPORTANT-2：不跨会话
+	AssetFactory.clear_cache()  # P1-6：mesh 缓存也不跨会话（与 _undo_stack 对齐）
 	if _dock:
 		remove_control_from_docks(_dock)
 		_dock.queue_free()
@@ -129,7 +130,9 @@ func _on_command(payload: Dictionary, batch_id: int, ws: WebSocketPeer) -> void:
 		)
 		if _dock:
 			_dock.add_to_generated_list(String(place_payload["name"]), String(r["node_path"]))
-		EditorInterface.mark_scene_as_unsaved()
+		# P1-5：mark 前校验 root 仍有效且是当前场景（防场景切换竞态操作失效场景）
+		if ScenePlacer.can_mark_scene(root, EditorInterface.get_edited_scene_root()):
+			EditorInterface.mark_scene_as_unsaved()
 	else:
 		_server.send_result(req_id, false, {"error": String(r["error"]), "message": "place 失败"}, ws)
 
@@ -355,7 +358,9 @@ func _handle_generate_path(
 			if seg_ok:
 				any_success = true
 	if any_success:
-		EditorInterface.mark_scene_as_unsaved()
+		# P1-5：mark 前校验 root 仍有效且是当前场景（防场景切换竞态）
+		if ScenePlacer.can_mark_scene(root, EditorInterface.get_edited_scene_root()):
+			EditorInterface.mark_scene_as_unsaved()
 
 
 # _place_one：构造 place_payload + ScenePlacer.place + send_result（discrete/continuous 共用，消除 loop 重复）

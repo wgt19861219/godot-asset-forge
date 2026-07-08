@@ -7,6 +7,8 @@ extends RefCounted
 
 # v7 mesh 缓存（static var 持 Mesh 引用，常驻 plugin session；@tool 热重载偶发清空无害）
 static var _cache: Dictionary = {}
+# P1-6：cache FIFO 上限（防 discrete 大量不同 params 无界增长；超限淘汰最早，Dictionary 保插入顺序）
+const _CACHE_LIMIT = 256
 
 
 # v7 缓存：相同 (shape, params) 返同一 Mesh 资源（MeshInstance3D 共享 → GPU vertex buffer 复用）
@@ -17,8 +19,15 @@ static func create_mesh(shape: String, params: Dictionary) -> Mesh:
 		return _cache[key]
 	var mesh: Mesh = create_mesh_uncached(shape, params)
 	if mesh != null:
+		if _cache.size() >= _CACHE_LIMIT:  # P1-6：FIFO 淘汰最早（防无界增长）
+			_cache.erase(_cache.keys()[0])
 		_cache[key] = mesh  # null（未知 shape）不缓存
 	return mesh
+
+
+# P1-6：清空 _cache（_exit_tree 调用，与 _undo_stack.clear() 对齐，不跨会话；@tool 热重载偶发清空无害）
+static func clear_cache() -> void:
+	_cache.clear()
 
 
 # 既有创建逻辑（create_mesh 缓存未命中时调；v11.5 提为 public 供 continuous 段循环调用，

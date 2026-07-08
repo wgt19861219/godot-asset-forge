@@ -64,6 +64,15 @@ static func undo_last(undo_stack: Array) -> Dictionary:
 	return {"success": true, "freed": freed, "error": ""}
 
 
+# P1-5：mark_scene_as_unsaved 前校验 root 仍有效且是当前活动场景（防场景切换竞态）
+# root 失效（free）或场景已切走（root != edited_scene_root）→ false，不 mark（避免操作失效场景）
+# 参数 Variant：root 可能已 free（场景切换中），Node 类型参数传 freed instance 会 SCRIPT ERROR（同 P2#5）
+static func can_mark_scene(root: Variant, current_root: Variant) -> bool:
+	if not is_instance_valid(root):
+		return false  # root 已 free（场景切换中失效）
+	return root == current_root  # root 仍有效但场景已切走（!= edited_scene_root）→ false
+
+
 # --- helpers ---
 
 

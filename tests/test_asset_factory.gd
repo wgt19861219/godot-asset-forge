@@ -132,3 +132,11 @@ func run(runner) -> void:
 	# 对照：create_mesh 仍缓存（v7 行为零回归）
 	var _cb := AssetFactory.create_mesh("box", {"size": [1.0, 1.0, 1.0]})
 	runner.check(AssetFactory._cache.size() == 1, "对照 create_mesh 仍写 _cache（v7 缓存未破坏）")
+	# === P1-6：cache FIFO 上限（防 discrete 大量不同 params 无界增长，审查 P1-6 残留）===
+	AssetFactory._cache.clear()
+	for i in 260:
+		AssetFactory.create_mesh("box", {"size": [float(i) + 0.001, 1.0, 1.0]})
+	runner.check(AssetFactory._cache.size() == 256, "P1-6：cache 上限 256（FIFO 淘汰最早，260 生成→size 256）")
+	# P1-6 clear_cache（_exit_tree 调用清空，与 _undo_stack.clear() 对齐，不跨会话）
+	AssetFactory.clear_cache()
+	runner.check(AssetFactory._cache.size() == 0, "P1-6：clear_cache() 清空 _cache（_exit_tree 调用）")

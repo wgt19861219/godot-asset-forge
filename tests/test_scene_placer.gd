@@ -134,6 +134,23 @@ func run(runner) -> void:
 		"P2#5 freed=2（3 条入栈但 b 已失效，只计 2 个真实释放，不虚报）"
 	)
 	runner.check(stack_p25.is_empty(), "P2#5 undo 后栈清空（3 条全弹，含失效条目）")
+	# === P1-5：can_mark_scene 校验（防场景切换竞态：mark 前 root 失效或场景切走 → 不 mark）===
+	var live_n := Node.new()
+	var other_n := Node.new()
+	runner.check(
+		ScenePlacer.can_mark_scene(live_n, live_n),
+		"P1-5：can_mark_scene root 有效且==当前场景 → true（应 mark）"
+	)
+	runner.check(
+		not ScenePlacer.can_mark_scene(live_n, other_n),
+		"P1-5：can_mark_scene root != 当前场景 → false（场景切走，不 mark）"
+	)
+	live_n.free()
+	runner.check(
+		not ScenePlacer.can_mark_scene(live_n, other_n),
+		"P1-5：can_mark_scene root 已 free → false（失效，不 mark）"
+	)
+	other_n.free()
 	# === ScenePlacer.resolve_path3d（v3 path_node）===
 	# 构造 root + Path3D + Curve3D（注：本 suite 已有变量 r3 = place 返回值，此处用 path_root 避免冲突）
 	var path_root := Node3D.new()
