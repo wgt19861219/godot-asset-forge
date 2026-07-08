@@ -334,6 +334,60 @@ func run(runner) -> void:
 			"A.13 message 含 '只能二选一'"
 		)
 
+	# === B.14 单件 generate 成功（save=true → resource_path 非空 + _dock_add + _mark_unsaved）===
+	var mock_b14 := MockServer.new()
+	var marked_b14 := [false]
+	var added_b14: Array = []
+	var orch_b14 := _make_orch(mock_b14, [], root, marked_b14, added_b14)
+	orch_b14.handle_command(
+		{"__req_id": "r14", "shape": "box", "name": "b14", "save": true}, 14, ws
+	)
+	runner.check(mock_b14.sent.size() == 1, "B.14 发 1 条 result")
+	if mock_b14.sent.size() == 1:
+		runner.check(bool(mock_b14.sent[0]["ok"]), "B.14 success=true")
+		var f14: Dictionary = mock_b14.sent[0]["fields"]
+		runner.check(String(f14.get("node_path", "")) != "", "B.14 node_path 非空")
+		# save=true → resource_path 非空（覆盖 :122 place_payload save 透传）
+		var rp14 := String(f14.get("resource_path", ""))
+		runner.check(rp14 != "", "B.14 save=true → resource_path 非空（:122 透传）")
+		runner.check(bool(marked_b14[0]), "B.14 _mark_unsaved 被调")
+		runner.check(added_b14.size() == 1, "B.14 _dock_add 被调 1 次")
+		# 清理 save 的 .tscn
+		if rp14 != "" and FileAccess.file_exists(rp14):
+			DirAccess.remove_absolute(rp14)
+
+	# === B.15 discrete path count=2（2 条 per-point result + _dock_add×2 + mark）===
+	var mock_b15 := MockServer.new()
+	var marked_b15 := [false]
+	var added_b15: Array = []
+	var orch_b15 := _make_orch(mock_b15, [], root, marked_b15, added_b15)
+	orch_b15.handle_command(
+		{"__req_id": "r15", "shape": "cylinder", "path": [[0, 0, 0], [3, 0, 0]], "count": 2, "name": "b15"},
+		15, ws
+	)
+	runner.check(mock_b15.sent.size() == 2, "B.15 discrete count=2 → 2 条 result")
+	var ok_count_b15 := 0
+	for r15 in mock_b15.sent:
+		if bool(r15["ok"]):
+			ok_count_b15 += 1
+	runner.check(ok_count_b15 == 2, "B.15 2 条都 success=true")
+	runner.check(added_b15.size() == 2, "B.15 _dock_add 被调 2 次")
+	runner.check(bool(marked_b15[0]), "B.15 any_success → _mark_unsaved 被调")
+
+	# === B.16 continuous wall 2 段（count=2 → 2 段 → 2 条 result）===
+	var mock_b16 := MockServer.new()
+	var marked_b16 := [false]
+	var orch_b16 := _make_orch(mock_b16, [], root, marked_b16, [])
+	orch_b16.handle_command(
+		{
+			"__req_id": "r16", "shape": "wall", "path": [[0, 0, 0], [3, 0, 0]],
+			"count": 2, "mode": "continuous", "name": "b16"
+		},
+		16, ws
+	)
+	runner.check(mock_b16.sent.size() == 2, "B.16 continuous count=2 → 2 条 result")
+	runner.check(bool(marked_b16[0]), "B.16 any_success → _mark_unsaved 被调")
+
 	# 清理 root
 	runner.root.remove_child(root)
 	root.free()
