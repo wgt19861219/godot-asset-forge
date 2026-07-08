@@ -9,7 +9,7 @@ Asset Forge —— Godot 4.6（Forward+）EditorPlugin：bash 一行命令经 We
 ## 常用命令
 
 ```bash
-# 跑全部测试（5 suite，headless，无需打开编辑器）
+# 跑全部测试（6 suite，headless，无需打开编辑器）
 # 注：godot 不在 PATH（bash 不解析 D:\godot\godot.cmd），用绝对路径调 console 版（带 stdout）：
 #     "/d/Godot/Godot_v4.6.3-stable_win64_console.exe" --headless --path . --script res://tests/test_runner.gd
 godot --headless --path . --script res://tests/test_runner.gd
@@ -21,7 +21,7 @@ python tools/forge_client.py --selftest
 pip install websockets
 ```
 
-跑单个 suite：`tests/test_runner.gd::_process` 硬编码注册全部 5 个 suite，**没有** CLI 过滤参数。要隔离某 suite，临时注释 `_process` 里其它四行 `_run_suite(...)`。单个 `runner.check` 失败不会中断 suite（跑完再汇总），有失败则进程 exit code = 1。
+跑单个 suite：`tests/test_runner.gd::_process` 硬编码注册全部 6 个 suite，**没有** CLI 过滤参数。要隔离某 suite，临时注释 `_process` 里其它五行 `_run_suite(...)`。单个 `runner.check` 失败不会中断 suite（跑完再汇总），有失败则进程 exit code = 1。
 
 ## 架构（跨文件大图）
 
@@ -30,7 +30,7 @@ pip install websockets
 ```
 bash → tools/forge_client.py ──WS──> command_server.poll → _handle_text
   → emit command_received(payload, batch_id)
-  → asset_forge_plugin._on_command
+  → asset_forge_plugin._on_command → Orchestrator.handle_command   # claim 5：编排层（零 EditorInterface 依赖）
     → AssetFactory.create_mesh(shape, params)        # 调度：6 PrimitiveMesh + 5 手写
     → AssetFactory.create_material(material spec)    # 预设名 / dict / res://.tres
     → ScenePlacer.place(root, mesh, mat, ..., _undo_stack, batch_id)
@@ -38,8 +38,9 @@ bash → tools/forge_client.py ──WS──> command_server.poll → _handle_t
   → forge_dock.add_to_generated_list                # 视口实时出现节点
 ```
 
-组件分层（全在 `addons/asset_forge/`，扁平 10 文件）：
-- `asset_forge_plugin.gd` —— EditorPlugin 入口：装配 dock+server、`_process` 里调 `server.poll()`、`_on_command` 编排、**`_undo_stack` 的唯一持有者**。
+组件分层（全在 `addons/asset_forge/`，扁平 11 文件）：
+- `asset_forge_plugin.gd` —— EditorPlugin 入口：装配 dock+server+Orchestrator、`_process` 里调 `server.poll()`、`_on_command` 1 行透传 Orchestrator、3 个 EditorInterface/UI 包装方法（`_get_root`/`_mark_unsaved`/`_dock_add`）；`_undo_stack` 的 clear 责任（Orchestrator 持非所有者引用）。
+- `orchestrator.gd` —— 编排层（claim 5）：`handle_command` + `_handle_generate_path` + `_place_one`，零 EditorInterface 依赖（经 Callable 注入 → 可 headless 单测，22 case `tests/test_orchestrator.gd`）。
 - `command_server.gd` —— WS 服务器（`bind 127.0.0.1:60650`）+ 协议常量 + handshake token 鉴权 + 消息分发。
 - `asset_factory.gd` / `custom_meshes.gd` / `material_library.gd` —— 纯静态调度层（mesh 分发、手写 ArrayMesh、10 预设材质）。
 - `scene_placer.gd` —— `place` / `undo_last` / 存 `.tscn`，纯静态。
@@ -60,7 +61,7 @@ bash → tools/forge_client.py ──WS──> command_server.poll → _handle_t
 ## 关键约定
 
 - **全 `@tool`**：每个 .gd 顶格 `@tool`（编辑器内运行）。注意 `EditorInterface.get_edited_scene_root()` 在无打开场景时返 `null`，分支要处理。
-- **没有 autoload；静态类靠 `class_name` 全局注册**：`AssetFactory` / `CustomMeshes` / `MaterialLibrary` / `ScenePlacer` / `LogHelper` / `AssetForgeServer` 都是 `class_name X extends RefCounted`，直接 `X.foo()` 调用，**不**需要 preload，`project.godot` 也无 autoload 段。`LogHelper` 内部用 `static var _instance` 持单例。唯一例外是插件入口 `asset_forge_plugin.gd`（EditorPlugin，由 `plugin.cfg` 指向）。
+- **没有 autoload；静态类靠 `class_name` 全局注册**：`AssetFactory` / `CustomMeshes` / `MaterialLibrary` / `ScenePlacer` / `Orchestrator` / `LogHelper` / `AssetForgeServer` 都是 `class_name X extends RefCounted`，直接 `X.foo()` 调用，**不**需要 preload，`project.godot` 也无 autoload 段。`LogHelper` 内部用 `static var _instance` 持单例。唯一例外是插件入口 `asset_forge_plugin.gd`（EditorPlugin，由 `plugin.cfg` 指向）。
 - **缩进 = Tab**（GDScript 默认）；注释一律简体中文；新增/修改时保留注释里的 `IMPORTANT-N` / `Q-N` / `A-N` 标记。
 - **向量协议**：JSON 里向量统一 `[x,y,z]` 数组，由各文件本地 `_vec3()` helper 解析（同时兼容 `Array` 与 `PackedFloat64Array`）。
 - **材质 spec 三态 + null**：`String` 预设名（未知回退 `default`）/ `Dictionary` 自定义 PBR（`color` 用 hex 如 `"FF0000"` 或 `"#FF0000"`，`alpha<1` 自动开透明）/ `"res://..."` 外部 `.tres` / `null` → default。
