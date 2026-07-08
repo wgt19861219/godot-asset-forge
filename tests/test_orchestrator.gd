@@ -388,6 +388,97 @@ func run(runner) -> void:
 	runner.check(mock_b16.sent.size() == 2, "B.16 continuous count=2 → 2 条 result")
 	runner.check(bool(marked_b16[0]), "B.16 any_success → _mark_unsaved 被调")
 
+	# === C.17 单件 generate 场景切走（place 成功但 mark 前 root 失效 → _mark_unsaved 不调）===
+	# _get_root 第一次（:72 取 root place）返 root，第二次（:98 mark 前 can_mark_scene 第二参数）返 null
+	var mock_c17 := MockServer.new()
+	var marked_c17 := [false]
+	var calls_c17 := [0]
+	var orch_c17 := Orchestrator.new(
+		mock_c17, [],
+		func() -> Node:
+			calls_c17[0] += 1
+			return root if calls_c17[0] == 1 else null,  # 第 1 次 root、第 2 次 null
+		func() -> void: marked_c17[0] = true,
+		func(_n, _p) -> void: pass
+	)
+	orch_c17.handle_command({"__req_id": "r17", "shape": "box", "name": "c17"}, 17, ws)
+	runner.check(mock_c17.sent.size() == 1, "C.17 发 1 条 result")
+	if mock_c17.sent.size() == 1:
+		runner.check(bool(mock_c17.sent[0]["ok"]), "C.17 place 成功（success=true）")
+		# P1-5 核心：place 成功但场景切走 → mark 不触发
+		runner.check(not bool(marked_c17[0]), "C.17 P1-5：场景切走 → _mark_unsaved 不触发（can_mark_scene 守住）")
+
+	# === C.18 continuous path 场景切走（段 place 成功但 :326 mark 前 root 失效 → mark 不触发）===
+	# 覆盖 path 分支的 mark 校验点 :326（与 C.17 单件 :98 互补）
+	var mock_c18 := MockServer.new()
+	var marked_c18 := [false]
+	var calls_c18 := [0]
+	var orch_c18 := Orchestrator.new(
+		mock_c18, [],
+		func() -> Node:
+			calls_c18[0] += 1
+			return root if calls_c18[0] == 1 else null,
+		func() -> void: marked_c18[0] = true,
+		func(_n, _p) -> void: pass
+	)
+	orch_c18.handle_command(
+		{
+			"__req_id": "r18", "shape": "wall", "path": [[0, 0, 0], [3, 0, 0]],
+			"count": 2, "mode": "continuous", "name": "c18"
+		},
+		18, ws
+	)
+	runner.check(mock_c18.sent.size() == 2, "C.18 2 段 place 成功（2 条 result）")
+	runner.check(not bool(marked_c18[0]), "C.18 P1-5：path 场景切走 → _mark_unsaved 不触发（:326 can_mark_scene 守住）")
+
+	# === D.19 batch 原子 undo 经编排层（同 batch_id=200 连续 2 次 generate → undo freed=2，R7）===
+	# 验编排层透传 batch_id 给 ScenePlacer（batch 原子语义在 ScenePlacer 已测，此处验编排层透传对）
+	var stack_d19: Array = []
+	var mock_d19 := MockServer.new()
+	var orch_d19 := Orchestrator.new(
+		mock_d19, stack_d19,
+		func() -> Node: return root,
+		func() -> void: pass,
+		func(_n, _p) -> void: pass
+	)
+	# 连续 2 次 generate（同 batch_id=200，模拟 server 层把 batch items 拆 emit 成单件）
+	orch_d19.handle_command({"__req_id": "d19a", "shape": "box", "name": "d19a"}, 200, ws)
+	orch_d19.handle_command({"__req_id": "d19b", "shape": "box", "name": "d19b"}, 200, ws)
+	runner.check(stack_d19.size() == 2, "D.19 前置：2 次 generate 入栈 2 条")
+	# undo（batch_id=-1 标记，__undo=true）→ 弹 batch_id=200 全部
+	mock_d19.sent.clear()
+	orch_d19.handle_command({"__req_id": "d19u", "__undo": true}, -1, ws)
+	runner.check(mock_d19.sent.size() == 1, "D.19 undo 发 1 条 result")
+	if mock_d19.sent.size() == 1:
+		runner.check(bool(mock_d19.sent[0]["ok"]), "D.19 undo success=true")
+		# R7：message "freed 2"（编排层透传 ScenePlacer batch 原子 freed 计数）
+		runner.check(
+			String(mock_d19.sent[0]["fields"].get("message")) == "freed 2",
+			"D.19 R7：undo message='freed 2'（batch 原子弹 2，selftest 硬依赖）"
+		)
+		runner.check(stack_d19.is_empty(), "D.19 undo 后栈清空（batch=200 全弹）")
+
+	# === E.20 _place_one 失败（discrete path count=2 + parent 不存在 → 2 条 error + any_success false → mark 不触发）===
+	# 注：单件 generate 失败走 :101（不经 _place_one）；E.20 必须用 path 分支测 _place_one 失败
+	var mock_e20 := MockServer.new()
+	var marked_e20 := [false]
+	var orch_e20 := _make_orch(mock_e20, [], root, marked_e20, [])
+	orch_e20.handle_command(
+		{
+			"__req_id": "r20", "shape": "box", "path": [[0, 0, 0], [3, 0, 0]],
+			"count": 2, "parent": "/Root/Nope"  # parent 不存在 → ScenePlacer.place parent_not_found
+		},
+		20, ws
+	)
+	runner.check(mock_e20.sent.size() == 2, "E.20 discrete count=2 → 2 条 result（_place_one 失败回执）")
+	var err_count_e20 := 0
+	for r20 in mock_e20.sent:
+		if String(r20["fields"].get("error")) == "parent_not_found":
+			err_count_e20 += 1
+	runner.check(err_count_e20 == 2, "E.20 2 条都 parent_not_found")
+	# P0-2：全失败 any_success false → mark 不触发
+	runner.check(not bool(marked_e20[0]), "E.20 P0-2：全失败 → _mark_unsaved 不触发（any_success 不累加）")
+
 	# 清理 root
 	runner.root.remove_child(root)
 	root.free()
