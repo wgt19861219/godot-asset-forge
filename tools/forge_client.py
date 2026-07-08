@@ -196,6 +196,12 @@ async def serve(args):
                     # 外层 OSError/TimeoutError 捕获）→ client reader.read 卡 30s 才回退直连。捕获返 timeout
                     # 错误，client 立即收失败（daemon 不死，单请求超时不连累后续）
                     resp = {"success": False, "error": "timeout", "message": "daemon 转发 server 超时"}
+                except Exception as e:
+                    # P1#4 扩展（手测发现）：server 停 = WS 关闭，send/recv 抛 websockets.ConnectionClosed*
+                    # （不继承 OSError）→ 原 except SystemExit / 外层 except(OSError,...) 都漏，冒泡杀 handler
+                    # Task、CLI 收不到 resp 卡死。统一返 forward_failed，daemon 不死、CLI 收错误而非卡/回退直连
+                    resp = {"success": False, "error": "forward_failed",
+                            "message": "daemon 转发失败: %s" % type(e).__name__}
             writer.write(json.dumps(resp, ensure_ascii=False).encode("utf-8"))
             await writer.drain()
         except (OSError, json.JSONDecodeError, asyncio.TimeoutError):

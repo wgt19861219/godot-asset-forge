@@ -201,6 +201,50 @@ def test_serve_stop_message_exits():
     asyncio.new_event_loop().run_until_complete(run())
 
 
+def test_serve_forward_failed_on_ws_closed():
+    """P1#4 扩展（手测发现）：daemon 转发时 server WS 已关闭（send 抛 ConnectionClosedOK，
+    websockets 异常不继承 OSError）→ daemon 应返 forward_failed resp，不杀 handler Task、CLI 收到错误。
+    修复前：ConnectionClosedOK 不被 except SystemExit / except(OSError,...) 捕获 → unhandled → CLI 收不到 resp。"""
+    from websockets.exceptions import ConnectionClosedOK
+
+    class FakeWSClosed:
+        """模拟 server 停止 → WS 正常关闭：send 抛 ConnectionClosedOK（对端 close 1000）。"""
+        async def send(self, _text):
+            raise ConnectionClosedOK(None, None)
+        async def close(self):
+            pass
+
+    cli_responses = []
+
+    async def run():
+        async def fake_handshake(args):
+            return FakeWSClosed()
+
+        async def cli_task():
+            await asyncio.sleep(0.3)  # 等 daemon 起来
+            reader, writer = await asyncio.open_connection("127.0.0.1", DAEMON_PORT)
+            writer.write(json.dumps({"type": "generate", "id": "req_1", "payload": {"shape": "box"}}).encode("utf-8"))
+            await writer.drain()
+            data = await asyncio.wait_for(reader.read(65536), timeout=5.0)
+            cli_responses.append(json.loads(data.decode("utf-8")))
+            writer.close()
+
+        with patch("forge_client.connect_and_handshake", new=fake_handshake):
+            serve_task = asyncio.create_task(serve(_make_args()))
+            cli_task_obj = asyncio.create_task(cli_task())
+            await asyncio.wait_for(cli_task_obj, timeout=6.0)
+            serve_task.cancel()
+            try:
+                await serve_task
+            except asyncio.CancelledError:
+                pass
+
+    asyncio.new_event_loop().run_until_complete(run())
+    assert len(cli_responses) == 1, "CLI 应收到 forward_failed resp（修复前超时无响应）"
+    assert cli_responses[0]["success"] is False
+    assert cli_responses[0]["error"] == "forward_failed"
+
+
 # === v8 Task 3：dispatch（daemon 在转发 / 不在直连回退 + 启 daemon）+ stdio 三件套 ===
 from forge_client import dispatch, _try_daemon, maybe_start_daemon, run_stop
 
