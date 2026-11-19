@@ -355,8 +355,7 @@ func _place_one(
 		if _dock_add.is_valid():
 			_dock_add.call(String(place_payload["name"]), String(r["node_path"]))
 		return true  # P0-2：成功（调用方累计 any_success）
-	else:
-		_server.send_result(
-			req_id, false, {"error": String(r["error"]), "message": "place 失败", "total": total}, ws
-		)
-		return false  # P0-2：失败
+	_server.send_result(
+		req_id, false, {"error": String(r["error"]), "message": "place 失败", "total": total}, ws
+	)
+	return false  # P0-2：失败
