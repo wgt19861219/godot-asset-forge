@@ -325,7 +325,12 @@ func _handle_generate_path(
 # V3-1（2026-11-19）：11 个位置参数收敛为 PlaceSpec（防呆构造期校验），单参签名
 func _place_one(spec: PlaceSpec) -> bool:
 	# P0-2：返回成功与否，调用方累计 any_success 决定是否 mark_scene_as_unsaved
-	if spec == null:  # PlaceSpec.create 拒绝时（缺必填已 push_error）不放置不回执
+	if spec == null:
+		# PlaceSpec.create 拒绝（缺必填已 push_error）。此处无从补失败回执——
+		# req_id/ws/total 全在 spec 内，null 即信息全失。上游预校验（root:116/
+		# probe_mesh:233-250/base_name:253-254 兜底）保证生产不可达；若未来放宽
+		# 必填校验，须在两个调用点（discrete/continuous 循环内）对 null 补发
+		# 失败回执，否则 client 按 total 计数会缺条（终审 M-7 契约记录）。
 		return false
 	var pos: Vector3 = spec.pos
 	var rot: Vector3 = spec.rot

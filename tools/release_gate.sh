@@ -8,9 +8,10 @@ cd "$(dirname "$0")/.." || exit 1
 GDFORMAT="/c/Users/wgt/AppData/Roaming/Python/Python314/Scripts/gdformat.exe"
 GDLINT="/c/Users/wgt/AppData/Roaming/Python/Python314/Scripts/gdlint.exe"
 GODOT="/d/godot/Godot_v4.6.3-stable_win64_console.exe"
-# Linux/CI 环境回退 PATH 查找
+# Linux/CI 环境回退 PATH 查找（M-5：GODOT 一并回退）
 command -v gdformat >/dev/null 2>&1 && GDFORMAT="gdformat"
 command -v gdlint >/dev/null 2>&1 && GDLINT="gdlint"
+command -v godot >/dev/null 2>&1 && [ ! -x "$GODOT" ] && GODOT="godot"
 
 fail=0
 
@@ -33,6 +34,11 @@ fi
 
 echo ""
 echo "== 门③ 测试全量（SceneTree runner）=="
+# M-5：新克隆/缓存缺失时先 --import（与 CI 一致；已缓存则跳过省时）
+if [ ! -f ".godot/global_script_class_cache.cfg" ]; then
+  echo "（class_name 缓存缺失，先 --import 一次）"
+  "$GODOT" --headless --path . --import >/dev/null 2>&1
+fi
 TEST_LOG="$(mktemp)"
 if "$GODOT" --headless --path . --script res://tests/test_runner.gd >"$TEST_LOG" 2>&1; then
   tail -1 "$TEST_LOG"
