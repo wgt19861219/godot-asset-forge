@@ -4,7 +4,6 @@
 class_name AssetFactory
 extends RefCounted
 
-
 # v7 mesh 缓存（static var 持 Mesh 引用，常驻 plugin session；@tool 热重载偶发清空无害）
 static var _cache: Dictionary = {}
 # P1-6：cache FIFO 上限（防 discrete 大量不同 params 无界增长；超限淘汰最早，Dictionary 保插入顺序）
@@ -107,12 +106,12 @@ static func _variant_key(v: Variant) -> String:
 		return _params_key(v)  # 嵌套 dict 递归 + 排序
 	if v is Array:
 		var parts: PackedStringArray = []
-		for x in (v as Array):
+		for x in v as Array:
 			parts.append(_variant_key(x))  # 数组有序（正确，数组本有序）
 		return "[" + ",".join(parts) + "]"
 	if v is PackedFloat64Array:  # _vec3 兼容（asset_factory.gd _vec3 接受 Array 或 PackedFloat64Array）
 		var parts: PackedStringArray = []
-		for x in (v as PackedFloat64Array):
+		for x in v as PackedFloat64Array:
 			parts.append(str(x))
 		return "[" + ",".join(parts) + "]"
 	return str(v)

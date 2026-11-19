@@ -12,9 +12,9 @@ var _server: RefCounted = null
 # IMPORTANT-2（修订）：clear 责任单一 + 生命周期跟 plugin；Orchestrator 持【非所有者引用】。
 # GDScript Array 引用语义：append/pop 直达 plugin 的栈；_exit_tree.clear() 仍由 plugin 执行。
 var _undo_stack: Array = []
-var _get_root: Callable       # 替 EditorInterface.get_edited_scene_root()
-var _mark_unsaved: Callable   # 替 EditorInterface.mark_scene_as_unsaved()
-var _dock_add: Callable       # 替 _dock.add_to_generated_list（plugin._dock_add 内部判 _dock null）
+var _get_root: Callable  # 替 EditorInterface.get_edited_scene_root()
+var _mark_unsaved: Callable  # 替 EditorInterface.mark_scene_as_unsaved()
+var _dock_add: Callable  # 替 _dock.add_to_generated_list（plugin._dock_add 内部判 _dock null）
 
 
 func _init(
@@ -108,47 +108,31 @@ func _handle_generate_path(
 	var mode := String(payload.get("mode", "discrete"))
 	if mode != "discrete" and mode != "continuous":
 		_server.send_result(
-			req_id,
-			false,
-			{"error": "invalid_params", "message": "mode 必须 discrete|continuous"},
-			ws
+			req_id, false, {"error": "invalid_params", "message": "mode 必须 discrete|continuous"}, ws
 		)
 		return
 	# A1：root 提前取（path_node 解析 + 后续 place 都需 root；v2 的 root 取值从 sample 之后提到最前）
 	var root: Node = _get_root.call()
 	if root == null:
-		_server.send_result(
-			req_id, false, {"error": "no_active_scene", "message": "无活动场景"}, ws
-		)
+		_server.send_result(req_id, false, {"error": "no_active_scene", "message": "无活动场景"}, ws)
 		return
 	# v3：path/path_node 互斥 + path 源分流
 	if payload.has("path") and payload.has("path_node"):
 		_server.send_result(
-			req_id,
-			false,
-			{"error": "invalid_params", "message": "path 与 path_node 互斥"},
-			ws
+			req_id, false, {"error": "invalid_params", "message": "path 与 path_node 互斥"}, ws
 		)
 		return
 	if not payload.has("path") and not payload.has("path_node"):
 		_server.send_result(
-			req_id,
-			false,
-			{"error": "invalid_params", "message": "必须提供 path 或 path_node 之一"},
-			ws
+			req_id, false, {"error": "invalid_params", "message": "必须提供 path 或 path_node 之一"}, ws
 		)
 		return
 	var points: Array
 	if payload.has("path_node"):
-		var resolved: Dictionary = ScenePlacer.resolve_path3d(
-			root, String(payload["path_node"])
-		)
+		var resolved: Dictionary = ScenePlacer.resolve_path3d(root, String(payload["path_node"]))
 		if String(resolved["error"]) != "":
 			_server.send_result(
-				req_id,
-				false,
-				{"error": "invalid_params", "message": String(resolved["error"])},
-				ws
+				req_id, false, {"error": "invalid_params", "message": String(resolved["error"])}, ws
 			)
 			return
 		points = resolved["points"]
@@ -186,8 +170,11 @@ func _handle_generate_path(
 			false,
 			{
 				"error": "invalid_params",
-				"message": "采样点预估 %d 超过上限 %d（缩短路径/增大 spacing/减少 count）"
-				% [pre_est, AssetForgeServer.BATCH_LIMIT]
+				"message":
+				(
+					"采样点预估 %d 超过上限 %d（缩短路径/增大 spacing/减少 count）"
+					% [pre_est, AssetForgeServer.BATCH_LIMIT]
+				)
 			},
 			ws
 		)
@@ -202,8 +189,7 @@ func _handle_generate_path(
 			false,
 			{
 				"error": "invalid_params",
-				"message":
-				"采样点为 0（路径太短 / spacing 过大 / continuous + total<spacing），无法生成"
+				"message": "采样点为 0（路径太短 / spacing 过大 / continuous + total<spacing），无法生成"
 			},
 			ws
 		)
@@ -215,8 +201,10 @@ func _handle_generate_path(
 			{
 				"error": "invalid_params",
 				"message":
-				"samples 上限 %d，实际 %d（缩短路径/增大 spacing/减少 count）"
-				% [AssetForgeServer.BATCH_LIMIT, samples.size()]
+				(
+					"samples 上限 %d，实际 %d（缩短路径/增大 spacing/减少 count）"
+					% [AssetForgeServer.BATCH_LIMIT, samples.size()]
+				)
 			},
 			ws
 		)
@@ -230,8 +218,7 @@ func _handle_generate_path(
 			false,
 			{
 				"error": "unsupported_shape",
-				"message":
-				"continuous 模式仅支持 wall/fence/ramp（length 沿 X），当前 " + shape
+				"message": "continuous 模式仅支持 wall/fence/ramp（length 沿 X），当前 " + shape
 			},
 			ws
 		)
@@ -244,18 +231,21 @@ func _handle_generate_path(
 		else AssetFactory.create_mesh(shape, base_params)
 	)
 	if probe_mesh == null:
-		_server.send_result(
-			req_id,
-			false,
-			{
-				"error": "unsupported_shape",
-				"message":
-				(
-					"未知 shape: %s（支持 box/cylinder/sphere/prism/wall/ramp/cone/tube/torus/stairs/fence）"
-					% shape
-				)
-			},
-			ws
+		(
+			_server
+			. send_result(
+				req_id,
+				false,
+				{
+					"error": "unsupported_shape",
+					"message":
+					(
+						"未知 shape: %s（支持 box/cylinder/sphere/prism/wall/ramp/cone/tube/torus/stairs/fence）"
+						% shape
+					)
+				},
+				ws
+			)
 		)
 		return
 	var material = AssetFactory.create_material(payload.get("material", null))
@@ -346,8 +336,7 @@ func _place_one(
 	var rot: Vector3 = rot_var
 	var place_payload := {
 		"name": "%s_%d" % [base_name, i],
-		"transform":
-		{"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
+		"transform": {"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
 		"parent": payload.get("parent", ""),
 		"save": payload.get("save", false),
 	}
@@ -364,15 +353,10 @@ func _place_one(
 			ws
 		)
 		if _dock_add.is_valid():
-			_dock_add.call(
-				String(place_payload["name"]), String(r["node_path"])
-			)
+			_dock_add.call(String(place_payload["name"]), String(r["node_path"]))
 		return true  # P0-2：成功（调用方累计 any_success）
 	else:
 		_server.send_result(
-			req_id,
-			false,
-			{"error": String(r["error"]), "message": "place 失败", "total": total},
-			ws
+			req_id, false, {"error": String(r["error"]), "message": "place 失败", "total": total}, ws
 		)
 		return false  # P0-2：失败

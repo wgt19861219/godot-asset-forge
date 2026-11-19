@@ -156,7 +156,9 @@ func send_result(id: String, success: bool, fields: Dictionary, ws: WebSocketPee
 # 根因：send_json 只入 outbound 队列，同帧 ws.close() 让 peer 转 CLOSING，未发送的 unauthorized
 # 数据帧在下一轮 poll 被丢弃 → client 只收到断连、收不到 unauthorized，卡 30s（id 是否匹配都一样）。
 # 方案：标记 pending_close，下一轮 server.poll 的 ws.poll() 把 unauthorized 发出后再 close
-func send_unauthorized_and_close(ws: WebSocketPeer, client: Dictionary, req_id: String = "") -> void:
+func send_unauthorized_and_close(
+	ws: WebSocketPeer, client: Dictionary, req_id: String = ""
+) -> void:
 	send_json(
 		ws,
 		{
@@ -205,8 +207,11 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 				send_json(
 					ws,
 					{
-						"type": MSG_GENERATE_RESULT, "id": req_id, "success": false,
-						"error": "invalid_params", "message": "handshake payload 必须是对象"
+						"type": MSG_GENERATE_RESULT,
+						"id": req_id,
+						"success": false,
+						"error": "invalid_params",
+						"message": "handshake payload 必须是对象"
 					}
 				)
 				return
@@ -232,7 +237,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			# v11.5 P1：payload 非 dict 守卫（与 I-1 顶层 / A-2 batch 一致），防强转 SCRIPT ERROR 中断 _handle_text
 			var payload_v: Variant = obj.get("payload", {})
 			if not (payload_v is Dictionary):
-				send_result(req_id, false, {"error": "invalid_params", "message": "generate payload 必须是对象"}, ws)
+				send_result(
+					req_id,
+					false,
+					{"error": "invalid_params", "message": "generate payload 必须是对象"},
+					ws
+				)
 				return
 			var payload: Dictionary = payload_v
 			payload["__req_id"] = req_id
@@ -256,7 +266,10 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			# 显式 invalid_params，守"每个无效输入都有对应回执"的输入守卫完备性
 			if arr.is_empty():
 				send_result(
-					req_id, false, {"error": "invalid_params", "message": "generate_batch items 不能为空"}, ws
+					req_id,
+					false,
+					{"error": "invalid_params", "message": "generate_batch items 不能为空"},
+					ws
 				)
 				return
 			# P2#7：item 类型校验提到 _batch_counter 自增前——任一畸形立即 invalid_params return，
@@ -294,7 +307,12 @@ func _handle_text(ws: WebSocketPeer, client: Dictionary, text: String) -> void:
 			# v11.5 P1：payload 非 dict 守卫（与 I-1/A-2 一致），防强转 SCRIPT ERROR 中断 _handle_text
 			var gp_v: Variant = obj.get("payload", {})
 			if not (gp_v is Dictionary):
-				send_result(req_id, false, {"error": "invalid_params", "message": "generate_path payload 必须是对象"}, ws)
+				send_result(
+					req_id,
+					false,
+					{"error": "invalid_params", "message": "generate_path payload 必须是对象"},
+					ws
+				)
 				return
 			var gp: Dictionary = gp_v
 			gp["__req_id"] = req_id

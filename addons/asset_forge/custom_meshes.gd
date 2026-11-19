@@ -232,13 +232,13 @@ static func make_ramp(params: Dictionary) -> ArrayMesh:
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	# 8 顶点
 	var d0 := Vector3(-hl, 0.0, -hw)  # 底面后左
-	var d1 := Vector3(-hl, 0.0, hw)   # 底面前左
-	var d2 := Vector3(hl, 0.0, hw)    # 底面前右
-	var d3 := Vector3(hl, 0.0, -hw)   # 底面后右
-	var t0 := Vector3(-hl, sh, -hw)   # 顶面后左
-	var t1 := Vector3(-hl, sh, hw)    # 顶面前左
-	var t2 := Vector3(hl, eh, hw)     # 顶面前右
-	var t3 := Vector3(hl, eh, -hw)    # 顶面后右
+	var d1 := Vector3(-hl, 0.0, hw)  # 底面前左
+	var d2 := Vector3(hl, 0.0, hw)  # 底面前右
+	var d3 := Vector3(hl, 0.0, -hw)  # 底面后右
+	var t0 := Vector3(-hl, sh, -hw)  # 顶面后左
+	var t1 := Vector3(-hl, sh, hw)  # 顶面前左
+	var t2 := Vector3(hl, eh, hw)  # 顶面前右
+	var t3 := Vector3(hl, eh, -hw)  # 顶面后右
 	# 6 面（_add_box 约定：顶点顺序让几何法线朝楔形内，set_normal 朝外）
 	_add_face(st, d1, d2, d3, d0, Vector3(0.0, -1.0, 0.0))  # 底面（内侧 +Y）
 	_add_face(st, t0, t3, t2, t1, Vector3(sh - eh, length, 0.0).normalized())  # 斜顶（法线 Y 恒 +length 朝上）

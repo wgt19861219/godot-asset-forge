@@ -159,7 +159,13 @@ static func _vec3(d: Dictionary, key: String) -> Vector3:
 static func _sanitize_name(name: String) -> String:
 	var sanitized := ""
 	for ch in name:
-		if (ch >= "a" and ch <= "z") or (ch >= "A" and ch <= "Z") or (ch >= "0" and ch <= "9") or ch == "_" or ch == "-":
+		if (
+			(ch >= "a" and ch <= "z")
+			or (ch >= "A" and ch <= "Z")
+			or (ch >= "0" and ch <= "9")
+			or ch == "_"
+			or ch == "-"
+		):
 			sanitized += ch
 		else:
 			sanitized += "_"

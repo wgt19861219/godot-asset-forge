@@ -27,8 +27,13 @@ static func parse_path(raw: Variant) -> Dictionary:
 # 输入退化校验 → 错误描述字符串（空串 = 合法）
 # mode: "discrete"（v1 默认，零回归）/ "continuous"（v2 段阵列）
 static func validate(
-	points: Array, spacing: float, count: int, align: String,
-	include_endpoints: bool, mode := "discrete", align_vertices := false
+	points: Array,
+	spacing: float,
+	count: int,
+	align: String,
+	include_endpoints: bool,
+	mode := "discrete",
+	align_vertices := false
 ) -> String:
 	if mode != "discrete" and mode != "continuous":
 		return "mode 必须 discrete|continuous"
@@ -70,8 +75,13 @@ static func validate(
 # mode="discrete"（v1）：返回顶点采样点（含 miter 切线）。
 # mode="continuous"：返回段数组 [{position, rotation_deg, length, distance}]（每段沿 chord）。
 static func sample(
-	points: Array, spacing: float, count: int, align: String,
-	include_endpoints: bool, mode := "discrete", align_vertices := false
+	points: Array,
+	spacing: float,
+	count: int,
+	align: String,
+	include_endpoints: bool,
+	mode := "discrete",
+	align_vertices := false
 ) -> Array:
 	if mode == "continuous":
 		return _sample_continuous(points, spacing, count, include_endpoints, align_vertices)
@@ -190,7 +200,7 @@ static func _to_vector3(p: Variant) -> Variant:
 	if p is Array:
 		arr = (p as Array).duplicate()
 	elif p is PackedFloat64Array:
-		for x in (p as PackedFloat64Array):
+		for x in p as PackedFloat64Array:
 			arr.append(x)
 	else:
 		return null
@@ -221,16 +231,21 @@ static func _compute_seg_heights(samples: Array, total_len: float, rise: float) 
 		var d_end: float = float(samples[i + 1]["distance"]) if i + 1 < n else total_len
 		if rise >= 0.0:
 			# 上升：0 → rise（递增）
-			heights.append({"start_h": abs_rise * d_start / total_len, "end_h": abs_rise * d_end / total_len})
+			heights.append(
+				{"start_h": abs_rise * d_start / total_len, "end_h": abs_rise * d_end / total_len}
+			)
 		else:
 			# 下降：abs_rise → 0（递减，正高度）
-			heights.append({"start_h": abs_rise * (total_len - d_start) / total_len, "end_h": abs_rise * (total_len - d_end) / total_len})
+			heights.append(
+				{
+					"start_h": abs_rise * (total_len - d_start) / total_len,
+					"end_h": abs_rise * (total_len - d_end) / total_len
+				}
+			)
 	return heights
 
 
-static func _distances(
-	total: float, spacing: float, count: int, include_endpoints: bool
-) -> Array:
+static func _distances(total: float, spacing: float, count: int, include_endpoints: bool) -> Array:
 	var distances: Array = []
 	if spacing > 0.0:
 		var d := 0.0
@@ -253,9 +268,7 @@ static func _distances(
 	return distances
 
 
-static func _position_at(
-	d: float, seg_len: Array, points: Array, total: float
-) -> Vector3:
+static func _position_at(d: float, seg_len: Array, points: Array, total: float) -> Vector3:
 	if d >= total - _EPS:
 		return points[points.size() - 1] as Vector3
 	var acc := 0.0
@@ -268,9 +281,7 @@ static func _position_at(
 	return points[points.size() - 1] as Vector3
 
 
-static func _tangent_at(
-	d: float, vertex_d: Array, seg_len: Array, points: Array
-) -> Vector3:
+static func _tangent_at(d: float, vertex_d: Array, seg_len: Array, points: Array) -> Vector3:
 	var last: int = points.size() - 1
 	# 末点
 	if abs(d - float(vertex_d[last])) < _EPS:
