@@ -141,13 +141,23 @@ JSON over WebSocket（端口 60650，bind 127.0.0.1）。消息类型：`handsha
 godot --headless --path . --script res://tests/test_runner.gd
 ```
 
-5 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer（后者用 WebSocketPeer 自连本地 server 直测协议层）。
+6 个 suite：AssetFactory / CustomMeshes / PathGenerator / ScenePlacer / CommandServer / Orchestrator（CommandServer 用 WebSocketPeer 自连本地 server 直测协议层）。
+
+## 贡献
+
+- 合并前跑 `bash tools/release_gate.sh`，三道门全绿才可提交/打 tag（push/PR 跑同样三道门的 CI）
+- 格式与 lint 规则在 `.gdlintrc` 与 gdformat 默认风格里——工具即规则，不用读风格指南
+- 新增功能必须带 `tests/test_*.gd` 用例（`runner.check` 断言，跑法见上节）
+- 代码中 `# WA:` 前缀标记的是必要 workaround（含原因），**不许删除或"修复"**
+- 中文注释与 commit message 是项目惯例
 
 ## 项目结构
 
 ```
-addons/asset_forge/   # 插件（10 文件，扁平结构）
+addons/asset_forge/   # 插件（12 文件，扁平结构）
   asset_forge_plugin.gd    # EditorPlugin 入口：装配 + _on_command 编排
+  orchestrator.gd          # 编排层（generate/path 分流 + _place_one）
+  place_spec.gd            # PlaceSpec 防呆参数对象（_place_one 单参契约）
   command_server.gd        # WS 服务器 + 协议常量 + handshake token 鉴权
   asset_factory.gd         # shape 调度 + 内置 mesh + create_material 4 来源
   custom_meshes.gd         # 5 手写 ArrayMesh（SurfaceTool）
@@ -156,7 +166,8 @@ addons/asset_forge/   # 插件（10 文件，扁平结构）
   forge_dock.gd            # Dock UI
   log_helper.gd / localization.gd / plugin.cfg
 tools/forge_client.py  # bash 客户端（generate / undo / batch / --selftest）
-tests/                  # 5 suite + test_runner.gd
+tools/release_gate.sh  # 发布护栏三道门（本地）
+tests/                  # 6 suite + test_runner.gd
 docs/                   # 架构 / shape / 协议 文档
 ```
 
