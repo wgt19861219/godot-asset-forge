@@ -481,6 +481,35 @@ func run(runner) -> void:
 	# P0-2：全失败 any_success false → mark 不触发
 	runner.check(not bool(marked_e20[0]), "E.20 P0-2：全失败 → _mark_unsaved 不触发（any_success 不累加）")
 
+	# === F.1 PlaceSpec.create 缺必填 → null + push_error（防呆：构造期拒，V3-1）===
+	# 注：变量不标类型——headless 下跨文件 class_name 类型标注有时序坑（见 _make_orch 注释）
+	var spec_f1a = PlaceSpec.create(null, BoxMesh.new(), null, "b", 0, Vector3.ZERO, Vector3.ZERO, {}, 1, 1, "r", ws)
+	runner.check(spec_f1a == null, "F.1 create root=null → null（构造期拒）")
+	var spec_f1b = PlaceSpec.create(root, BoxMesh.new(), null, "", 0, Vector3.ZERO, Vector3.ZERO, {}, 1, 1, "r", ws)
+	runner.check(spec_f1b == null, "F.1 create base_name 空 → null")
+	var spec_f1c = PlaceSpec.create(root, null, null, "b", 0, Vector3.ZERO, Vector3.ZERO, {}, 1, 1, "r", ws)
+	runner.check(spec_f1c == null, "F.1 create mesh=null → null")
+
+	# === F.2 正常路径：字段透传 + _place_one(spec) 放置成功回执 ===
+	var spec_f2 = PlaceSpec.create(
+		root, BoxMesh.new(), null, "f2", 3, Vector3(1, 2, 3), Vector3.ZERO, {"parent": ""}, 7, 5, "req_f2", ws
+	)
+	runner.check(spec_f2 != null, "F.2 create 必填齐全 → 非 null")
+	if spec_f2 != null:
+		runner.check(
+			spec_f2.base_name == "f2" and spec_f2.index == 3 and spec_f2.batch_id == 7 and spec_f2.total == 5,
+			"F.2 字段透传（base_name/index/batch_id/total）"
+		)
+		var mock_f2 := MockServer.new()
+		var marked_f2 := [false]
+		var orch_f2 := _make_orch(mock_f2, [], root, marked_f2, [])
+		var ok_f2: bool = orch_f2._place_one(spec_f2)
+		runner.check(ok_f2, "F.2 _place_one(spec) 成功")
+		runner.check(
+			mock_f2.sent.size() == 1 and bool(mock_f2.sent[0]["ok"]) and int(mock_f2.sent[0]["fields"]["total"]) == 5,
+			"F.2 回执 ok 且 total=5"
+		)
+
 	# 清理 root
 	runner.root.remove_child(root)
 	root.free()

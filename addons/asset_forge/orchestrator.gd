@@ -258,18 +258,20 @@ func _handle_generate_path(
 		for i in samples.size():
 			var s: Dictionary = samples[i]
 			var ok := _place_one(
-				root,
-				probe_mesh,
-				material,
-				base_name,
-				i,
-				s["position"],
-				s["rotation_deg"],
-				payload,
-				batch_id,
-				samples.size(),  # v3：total
-				req_id,
-				ws
+				PlaceSpec.create(
+					root,
+					probe_mesh,
+					material,
+					base_name,
+					i,
+					s["position"],
+					s["rotation_deg"],
+					payload,
+					batch_id,
+					samples.size(),  # v3：total
+					req_id,
+					ws
+				)
 			)
 			if ok:
 				any_success = true
@@ -296,18 +298,20 @@ func _handle_generate_path(
 				seg_params["end_height"] = float(ramp_heights[i]["end_h"])
 			var seg_mesh := AssetFactory.create_mesh_uncached(shape, seg_params)  # v11.5：段 mesh 不进 _cache（一次性几何）
 			var seg_ok := _place_one(
-				root,
-				seg_mesh,
-				material,
-				base_name,
-				i,
-				seg["position"],
-				seg["rotation_deg"],
-				payload,
-				batch_id,
-				seg_count,  # v3：total
-				req_id,
-				ws
+				PlaceSpec.create(
+					root,
+					seg_mesh,
+					material,
+					base_name,
+					i,
+					seg["position"],
+					seg["rotation_deg"],
+					payload,
+					batch_id,
+					seg_count,  # v3：total
+					req_id,
+					ws
+				)
 			)
 			if seg_ok:
 				any_success = true
@@ -318,44 +322,40 @@ func _handle_generate_path(
 
 
 # _place_one：构造 place_payload + ScenePlacer.place + send_result（discrete/continuous 共用，消除 loop 重复）
-func _place_one(
-	root: Node,
-	mesh: Mesh,
-	material: Material,
-	base_name: String,
-	i: int,
-	pos_var: Variant,
-	rot_var: Variant,
-	payload: Dictionary,
-	batch_id: int,
-	total: int,  # v3 新增（D 方案：client 收第一条读 total 收齐）
-	req_id: String,
-	ws: WebSocketPeer
-) -> bool:  # P0-2：返回成功与否，调用方累计 any_success 决定是否 mark_scene_as_unsaved
-	var pos: Vector3 = pos_var
-	var rot: Vector3 = rot_var
+# V3-1（2026-11-19）：11 个位置参数收敛为 PlaceSpec（防呆构造期校验），单参签名
+func _place_one(spec: PlaceSpec) -> bool:
+	# P0-2：返回成功与否，调用方累计 any_success 决定是否 mark_scene_as_unsaved
+	if spec == null:  # PlaceSpec.create 拒绝时（缺必填已 push_error）不放置不回执
+		return false
+	var pos: Vector3 = spec.pos
+	var rot: Vector3 = spec.rot
 	var place_payload := {
-		"name": "%s_%d" % [base_name, i],
+		"name": "%s_%d" % [spec.base_name, spec.index],
 		"transform": {"position": [pos.x, pos.y, pos.z], "rotation_deg": [rot.x, rot.y, rot.z]},
-		"parent": payload.get("parent", ""),
-		"save": payload.get("save", false),
+		"parent": spec.payload.get("parent", ""),
+		"save": spec.payload.get("save", false),
 	}
-	var r := ScenePlacer.place(root, mesh, material, place_payload, _undo_stack, batch_id)
+	var r := ScenePlacer.place(
+		spec.root, spec.mesh, spec.material, place_payload, _undo_stack, spec.batch_id
+	)
 	if bool(r["success"]):
 		_server.send_result(
-			req_id,
+			spec.req_id,
 			true,
 			{
 				"node_path": String(r["node_path"]),
 				"resource_path": String(r["resource_path"]),
-				"total": total  # v3 新增（D 方案：client 收第一条读 total 收齐）
+				"total": spec.total  # v3 新增（D 方案：client 收第一条读 total 收齐）
 			},
-			ws
+			spec.ws
 		)
 		if _dock_add.is_valid():
 			_dock_add.call(String(place_payload["name"]), String(r["node_path"]))
 		return true  # P0-2：成功（调用方累计 any_success）
 	_server.send_result(
-		req_id, false, {"error": String(r["error"]), "message": "place 失败", "total": total}, ws
+		spec.req_id,
+		false,
+		{"error": String(r["error"]), "message": "place 失败", "total": spec.total},
+		spec.ws
 	)
 	return false  # P0-2：失败
