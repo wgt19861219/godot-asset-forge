@@ -1,0 +1,38 @@
+name: CI
+# 轻量发布护栏（V3-3）：push/PR 跑与本地 tools/release_gate.sh 相同的三道门。
+# 贡献者防线：lint 即规则（.gdlintrc），README 贡献节只留指引。
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 安装 gdtoolkit
+        run: pip install gdtoolkit==4.5.0
+
+      - name: 门① gdformat --check
+        run: gdformat --check addons/
+
+      - name: 门② gdlint
+        run: gdlint addons/
+
+      - name: 拉 Godot 4.6.3 headless
+        run: |
+          curl -L -o godot.zip https://github.com/godotengine/godot/releases/download/4.6.3-stable/Godot_v4.6.3-stable_linux.x86_64.zip
+          unzip godot.zip
+          chmod +x Godot_v4.6.3-stable_linux.x86_64
+
+      - name: 门③ 测试全量（--import 两次刷新 class_name 缓存后跑）
+        run: |
+          ./Godot_v4.6.3-stable_linux.x86_64 --headless --path . --import
+          ./Godot_v4.6.3-stable_linux.x86_64 --headless --path . --import
+          ./Godot_v4.6.3-stable_linux.x86_64 --headless --path . --script res://tests/test_runner.gd
